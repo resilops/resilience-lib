@@ -1,0 +1,24 @@
+from kubernetes import client
+
+
+class KubernetesClient:
+
+    @property
+    def api(self):
+        return client.ApiClient()
+
+    @property
+    def v1_api(self) -> client.CoreV1Api:
+        return client.CoreV1Api(self.api)
+
+    @property
+    def apps(self) -> client.AppsV1Api:
+        return client.AppsV1Api(self.api)
+
+    @property
+    def autoscaling(self) -> client.AutoscalingV1Api:
+        return client.AutoscalingV1Api(self.api)
+
+    @property
+    def policy(self) -> client.PolicyV1Api:
+        return client.PolicyV1Api(self.api)
