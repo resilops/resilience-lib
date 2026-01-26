@@ -11,7 +11,7 @@ class TerminatePodsArgs(BaseModel):
     and ensures correct types and values. Extra fields are allowed for
     forward compatibility.
     """
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
 
     namespace: str = Field(
         ..., description="Kubernetes namespace of the workload."

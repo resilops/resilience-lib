@@ -10,7 +10,7 @@ class WaitForWorkloadStabilityArgs(BaseModel):
     and ensures correct types and default values.
     """
 
-    model_config = ConfigDict(extra="allow")  # Allow extra kwargs without error
+    model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
 
     namespace: str = Field(
         ...,

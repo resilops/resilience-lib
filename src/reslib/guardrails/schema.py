@@ -10,7 +10,7 @@ class ValidatePodTerminationGuardrailArgs(BaseModel):
     Validates that the control plane payload contains all required fields
     and ensures correct types and values.
     """
-    model_config = ConfigDict(extra="allow")  # allow extra kwargs
+    model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
 
     namespace: str = Field(
         ..., description="Kubernetes namespace of the workload."

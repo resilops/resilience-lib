@@ -5,3 +5,7 @@ class FunctionNotFound(Exception):
 
 class InvalidAsyncHandler(Exception):
     pass
+
+
+class PhaseExecutionFailed(Exception):
+    pass

@@ -6,7 +6,7 @@ from typing import Tuple, Any
 from reslib.constants import ReslibEventEnum
 from reslib.k8s.schema import WorkloadState
 from reslib.k8s.utils import get_single_workload
-from reslib.schemas.event import EventPayload
+from reslib.schemas.event import ResLibEventPayload
 from reslib.runtime.phases import ExecutionPhase
 from reslib.observers.schema import MeasureHTTPLatencyArgs
 
@@ -75,10 +75,10 @@ async def measure_http_latency(**kwargs) -> None:
 
     # 3. Emit observer events
     for response in responses:
-        event = EventPayload(
+        event = ResLibEventPayload(
             event_name=ReslibEventEnum.OBSERVER_METRICS,
             phase=ExecutionPhase.OBSERVER,
-            workload_state=workload.dict(),
+            workload_state=workload.model_dump(),
             observer_name="http_latency_with_state"
         )
 

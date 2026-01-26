@@ -1,10 +1,11 @@
 from typing import Optional
 from pydantic import BaseModel, Field, ConfigDict
+
 from reslib.runtime.phases import ExecutionPhase
 from reslib.constants import ReslibEventEnum
 
 
-class EventPayload(BaseModel):
+class ResLibEventPayload(BaseModel):
     """Base event payload that allows arbitrary additional fields."""
 
     model_config = ConfigDict(extra="allow")

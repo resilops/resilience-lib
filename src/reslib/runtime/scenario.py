@@ -1,11 +1,16 @@
+import logging
 from typing import Optional, Dict, Any
+from kubernetes import config as k8sconfig
 
 from reslib import helpers as h
+from reslib.config import config
+from reslib.logging import setup_logging
+from reslib.exceptions import PhaseExecutionFailed
 from reslib.runtime.phases import ExecutionPhase
 from reslib.runtime.resolve import resolve
 from reslib.core.context import ObserverContext
 from reslib.constants import AsyncFunc, ReslibEventEnum
-from reslib.schemas.event import EventPayload
+from reslib.schemas.event import ResLibEventPayload
 from reslib.schemas.scenario import (
     BaseSpec,
     BaseOptionalSpec,
@@ -14,6 +19,28 @@ from reslib.schemas.scenario import (
     RollbackSpec,
     GuardRailSpec,
 )
+
+logger = logging.getLogger(__name__)
+
+
+def _lib_setup() -> None:
+    """
+    Perform initial application setup.
+
+    - Configure logging
+    - Load Kubernetes configuration
+
+    Prefers in-cluster configuration when running inside Kubernetes.
+    Falls back to local kubeconfig for development.
+    """
+    setup_logging()
+
+    if config.in_cluster_config:
+        logger.info("Loading in-cluster Kubernetes configuration")
+        k8sconfig.load_incluster_config()
+    else:
+        logger.info("Loading local kubeconfig")
+        k8sconfig.load_kube_config()
 
 
 async def _execute_phase(
@@ -42,20 +69,25 @@ async def _execute_phase(
     if not spec.name:
         return
 
+    logger.info(f"Executing phase: {phase.name}")
+
     try:
         func: AsyncFunc = resolve(phase=phase, name=spec.name)
         await func(**spec.kwargs, event_recorder=event_recorder)
         event_recorder.record(
-            event=EventPayload(event_name=success_event, phase=phase)
+            event=ResLibEventPayload(event_name=success_event, phase=phase)
         )
     except Exception as exc:
-        event_recorder.record(event=EventPayload(
+        event_recorder.record(event=ResLibEventPayload(
             event_name=failure_event, phase=phase, is_error=True, error_msg=str(exc)
         ))
-        raise
+        raise PhaseExecutionFailed(
+            f"Error executing phase: {phase.name}"
+        ) from exc
 
 
 async def execute_resilience_scenario(
+    *,
     action: Dict[str, Any],
     observer: Dict[str, Any],
     guardrail: Optional[Dict[str, Any]] = None,
@@ -80,6 +112,7 @@ async def execute_resilience_scenario(
         rollback: Optional definition of rollback behavior.
         event_recorder: Recorder used to emit lifecycle and result events.
     """
+    _lib_setup()
     event_recorder = event_recorder or h.NoopEventRecorder()
 
     action_spec = ActionSpec(**action)
