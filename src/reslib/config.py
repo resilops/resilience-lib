@@ -16,7 +16,7 @@ class ResilienceLibConfig(BaseSettings):
     pod_termination_max_timeout: int = Field(
         default=300,
         gt=30,
-        description="Maximum time to wait for pod termination (seconds)."
+        description="Maximum time to wait for pod termination (seconds).",
     )
 
 

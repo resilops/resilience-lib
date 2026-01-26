@@ -1,11 +1,10 @@
 import inspect
 from types import ModuleType
 
-from reslib import actions, observers, rollbacks, guardrails
+from reslib import actions, guardrails, observers, rollbacks
 from reslib.constants import AsyncFunc
 from reslib.exceptions import FunctionNotFound, InvalidAsyncHandler
 from reslib.runtime.phases import ExecutionPhase
-
 
 __all__ = ["resolve"]
 
@@ -47,16 +46,12 @@ def _resolve_async_function(module: ModuleType, name: str) -> AsyncFunc:
     """
     exported = getattr(module, "__all__", [])
     if name not in exported:
-        raise FunctionNotFound(
-            f"'{name}' is not exported by module {module.__name__}"
-        )
+        raise FunctionNotFound(f"'{name}' is not exported by module {module.__name__}")
 
     func: AsyncFunc = getattr(module, name)
 
     if not inspect.iscoroutinefunction(func):
-        raise InvalidAsyncHandler(
-            f"'{name}' in module {module.__name__} must be async"
-        )
+        raise InvalidAsyncHandler(f"'{name}' in module {module.__name__} must be async")
 
     return func
 

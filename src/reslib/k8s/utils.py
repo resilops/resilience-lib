@@ -1,12 +1,12 @@
 from typing import List, Optional
 
-from kubernetes.client.exceptions import ApiException
 from kubernetes.client import V1Pod
+from kubernetes.client.exceptions import ApiException
 
 from reslib.config import config
-from reslib.k8s.exceptions import WorkloadNotFound, MultipleWorkloadsReturned
 from reslib.k8s.client import KubernetesClient
 from reslib.k8s.discovery import discover_workloads
+from reslib.k8s.exceptions import MultipleWorkloadsReturned, WorkloadNotFound
 from reslib.k8s.schema import WorkloadState
 
 
@@ -30,7 +30,9 @@ def get_single_workload(
     """
     workloads: List[WorkloadState] = list(
         discover_workloads(
-            k8s or KubernetesClient(), namespace=namespace, labels=labels,
+            k8s or KubernetesClient(),
+            namespace=namespace,
+            labels=labels,
         )
     )
 

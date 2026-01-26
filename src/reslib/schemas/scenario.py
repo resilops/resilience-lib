@@ -1,4 +1,5 @@
-from typing import Optional, Any, Dict
+from typing import Any, Dict, Optional
+
 from pydantic import BaseModel, Field
 
 
@@ -7,8 +8,7 @@ class BaseSpec(BaseModel):
 
     name: str = Field(..., description="Name of the function to execute.")
     kwargs: Dict[str, Any] = Field(
-        default_factory=dict,
-        description="Keyword arguments passed to the function."
+        default_factory=dict, description="Keyword arguments passed to the function."
     )
 
 
@@ -16,12 +16,10 @@ class BaseOptionalSpec(BaseModel):
     """Base optional specification for a function name and its arguments."""
 
     name: Optional[str] = Field(
-        default=None,
-        description="Name of the function to execute."
+        default=None, description="Name of the function to execute."
     )
     kwargs: Optional[Dict[str, Any]] = Field(
-        default=None,
-        description="Keyword arguments passed to the function."
+        default=None, description="Keyword arguments passed to the function."
     )
 
 
@@ -39,9 +37,7 @@ class ObserverSpec(BaseSpec):
     warmup_period: int = Field(
         default=0, description="Observer warmup period in seconds"
     )
-    grace_period: int = Field(
-        default=0, description="Grace period in seconds"
-    )
+    grace_period: int = Field(default=0, description="Grace period in seconds")
 
 
 class RollbackSpec(BaseOptionalSpec):

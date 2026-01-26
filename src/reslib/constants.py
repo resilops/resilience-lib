@@ -1,6 +1,5 @@
 from enum import Enum
-from typing import Callable, Awaitable
-
+from typing import Awaitable, Callable
 
 POD_RUNNING_STATUS = "Running"
 

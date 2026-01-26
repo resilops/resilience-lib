@@ -1,23 +1,24 @@
 import logging
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
+
 from kubernetes import config as k8sconfig
 
 from reslib import helpers as h
 from reslib.config import config
-from reslib.logging import setup_logging
+from reslib.constants import AsyncFunc, ReslibEventEnum
+from reslib.core.context import ObserverContext
 from reslib.exceptions import PhaseExecutionFailed
+from reslib.logging import setup_logging
 from reslib.runtime.phases import ExecutionPhase
 from reslib.runtime.resolve import resolve
-from reslib.core.context import ObserverContext
-from reslib.constants import AsyncFunc, ReslibEventEnum
 from reslib.schemas.event import ResLibEventPayload
 from reslib.schemas.scenario import (
-    BaseSpec,
-    BaseOptionalSpec,
     ActionSpec,
+    BaseOptionalSpec,
+    BaseSpec,
+    GuardRailSpec,
     ObserverSpec,
     RollbackSpec,
-    GuardRailSpec,
 )
 
 logger = logging.getLogger(__name__)
@@ -78,12 +79,12 @@ async def _execute_phase(
             event=ResLibEventPayload(event_name=success_event, phase=phase)
         )
     except Exception as exc:
-        event_recorder.record(event=ResLibEventPayload(
-            event_name=failure_event, phase=phase, is_error=True, error_msg=str(exc)
-        ))
-        raise PhaseExecutionFailed(
-            f"Error executing phase: {phase.name}"
-        ) from exc
+        event_recorder.record(
+            event=ResLibEventPayload(
+                event_name=failure_event, phase=phase, is_error=True, error_msg=str(exc)
+            )
+        )
+        raise PhaseExecutionFailed(f"Error executing phase: {phase.name}") from exc
 
 
 async def execute_resilience_scenario(
@@ -92,7 +93,7 @@ async def execute_resilience_scenario(
     observer: Dict[str, Any],
     guardrail: Optional[Dict[str, Any]] = None,
     rollback: Optional[Dict[str, Any]] = None,
-    event_recorder: Optional[h.BaseEventRecorder] = None
+    event_recorder: Optional[h.BaseEventRecorder] = None,
 ) -> None:
     """
     Execute a full resilience scenario.

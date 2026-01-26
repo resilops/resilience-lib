@@ -1,10 +1,10 @@
-from reslib.k8s.utils import get_single_workload
-from reslib.k8s.schema import WorkloadState
-from reslib.schemas.validators import QuantitySelection
 from reslib.guardrails.schema import ValidatePodTerminationGuardrailArgs
-from reslib.policies.workload import WorkloadHealthPolicy
+from reslib.k8s.schema import WorkloadState
+from reslib.k8s.utils import get_single_workload
 from reslib.policies.availability import MinAvailabilityPolicy
 from reslib.policies.pdb import PodDisruptionBudgetPolicy
+from reslib.policies.workload import WorkloadHealthPolicy
+from reslib.schemas.validators import QuantitySelection
 
 
 async def validate_pod_termination_guardrail(**kwargs) -> None:
@@ -55,7 +55,7 @@ async def validate_pod_termination_guardrail(**kwargs) -> None:
     MinAvailabilityPolicy(
         total=workload.status.ready_replicas,
         terminate=pods_to_terminate,
-        min_remaining=args.min_remaining_replicas
+        min_remaining=args.min_remaining_replicas,
     )
 
     # Apply PodDisruptionBudgetPolicy if requested
@@ -68,5 +68,5 @@ async def validate_pod_termination_guardrail(**kwargs) -> None:
 
         PodDisruptionBudgetPolicy(
             remaining=workload.status.ready_replicas - pods_to_terminate,
-            pdb_min_available=pdb_min_available
+            pdb_min_available=pdb_min_available,
         )

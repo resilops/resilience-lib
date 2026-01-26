@@ -1,7 +1,7 @@
-
 from typing import List
-from kubernetes.client import V1Deployment
+
 from kubernetes import config as k8config
+from kubernetes.client import V1Deployment
 
 
 def current_cluster_name() -> str:

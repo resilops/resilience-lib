@@ -1,4 +1,5 @@
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
+
 from reslib import helpers as h
 
 
@@ -12,9 +13,7 @@ class MeasureHTTPLatencyArgs(BaseModel):
 
     model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
 
-    namespace: str = Field(
-        ..., description="Kubernetes namespace of the workload."
-    )
+    namespace: str = Field(..., description="Kubernetes namespace of the workload.")
     labels: str = Field(
         ..., description="Label selector to identify the workload pods."
     )
@@ -29,5 +28,5 @@ class MeasureHTTPLatencyArgs(BaseModel):
     )
     event_recorder: h.BaseEventRecorder = Field(
         default_factory=h.NoopEventRecorder,
-        description="Async recorder used to emit latency metrics."
+        description="Async recorder used to emit latency metrics.",
     )

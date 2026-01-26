@@ -1,10 +1,11 @@
 import asyncio
 import logging
 from typing import Optional
+
 from reslib.constants import AsyncFunc
-from reslib.schemas.scenario import ObserverSpec
-from reslib.runtime.resolve import resolve
 from reslib.runtime.phases import ExecutionPhase
+from reslib.runtime.resolve import resolve
+from reslib.schemas.scenario import ObserverSpec
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +48,8 @@ class ObserverContext:
         """
         logger.info("Starting observer: %s", self.spec.name)
         self._task = asyncio.create_task(
-            self._observer_loop(), name=f"observer:{self.spec.name}",
+            self._observer_loop(),
+            name=f"observer:{self.spec.name}",
         )
 
         # Allow observer to establish baseline
@@ -74,7 +76,7 @@ class ObserverContext:
             logger.info(
                 "Observer %s continuing for grace period: %s seconds",
                 self.spec.name,
-                self.spec.grace_period
+                self.spec.grace_period,
             )
             await asyncio.sleep(self.spec.grace_period)
 

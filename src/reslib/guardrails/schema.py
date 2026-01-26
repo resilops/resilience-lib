@@ -1,6 +1,7 @@
-from pydantic import BaseModel, Field, ConfigDict
-from reslib.constants import QuantitySelectionModeEnum
+from pydantic import BaseModel, ConfigDict, Field
+
 from reslib import helpers as h
+from reslib.constants import QuantitySelectionModeEnum
 
 
 class ValidatePodTerminationGuardrailArgs(BaseModel):
@@ -10,11 +11,10 @@ class ValidatePodTerminationGuardrailArgs(BaseModel):
     Validates that the control plane payload contains all required fields
     and ensures correct types and values.
     """
+
     model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
 
-    namespace: str = Field(
-        ..., description="Kubernetes namespace of the workload."
-    )
+    namespace: str = Field(..., description="Kubernetes namespace of the workload.")
     labels: str = Field(
         ..., description="Label selector to identify the workload pods."
     )
@@ -32,5 +32,5 @@ class ValidatePodTerminationGuardrailArgs(BaseModel):
     )
     event_recorder: h.BaseEventRecorder = Field(
         default_factory=h.NoopEventRecorder,
-        description="Event recorder to log metrics or errors."
+        description="Event recorder to log metrics or errors.",
     )

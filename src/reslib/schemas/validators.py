@@ -1,4 +1,5 @@
 import math
+
 from pydantic import BaseModel, Field, model_validator
 
 from reslib.constants import QuantitySelectionModeEnum
@@ -18,7 +19,8 @@ class QuantitySelection(BaseModel):
     """
 
     mode: QuantitySelectionModeEnum = Field(
-        ..., description="Selection mode: absolute count or percentage",
+        ...,
+        description="Selection mode: absolute count or percentage",
     )
 
     amount: int = Field(..., gt=0, description="Selection value (count or percentage)")

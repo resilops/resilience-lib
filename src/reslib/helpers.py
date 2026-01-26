@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+
 from reslib.schemas.event import ResLibEventPayload
 
 

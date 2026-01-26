@@ -1,8 +1,9 @@
 from typing import Optional
-from pydantic import BaseModel, Field, ConfigDict
 
-from reslib.runtime.phases import ExecutionPhase
+from pydantic import BaseModel, ConfigDict, Field
+
 from reslib.constants import ReslibEventEnum
+from reslib.runtime.phases import ExecutionPhase
 
 
 class ResLibEventPayload(BaseModel):

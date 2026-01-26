@@ -1,4 +1,5 @@
 from pydantic import BaseModel, Field, model_validator
+
 from reslib.k8s.exceptions import DisruptionExceedMinAvailabilityError
 
 

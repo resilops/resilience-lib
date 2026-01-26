@@ -7,15 +7,15 @@ from kubernetes.client import V1DeleteOptions, V1Pod
 from reslib.actions.schemas import TerminatePodsArgs
 from reslib.constants import POD_RUNNING_STATUS
 from reslib.core.watchdog import monitor_tasks
-from reslib.k8s.schema import WorkloadState
-from reslib.schemas.validators import QuantitySelection
 from reslib.k8s.client import KubernetesClient
 from reslib.k8s.exceptions import PodDeletionTimeoutError, PodsSelectionError
+from reslib.k8s.schema import WorkloadState
 from reslib.k8s.utils import (
-    pod_exists,
-    get_single_workload,
     get_pod_termination_timeout,
+    get_single_workload,
+    pod_exists,
 )
+from reslib.schemas.validators import QuantitySelection
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +107,7 @@ async def terminate_pods(**kwargs) -> None:
                 for pod in candidate_pods
             ],
             timeout=get_pod_termination_timeout(candidate_pods),
-            return_when=asyncio.FIRST_EXCEPTION
+            return_when=asyncio.FIRST_EXCEPTION,
         )
     except TimeoutError:
         raise PodDeletionTimeoutError(

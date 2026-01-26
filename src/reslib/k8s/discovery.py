@@ -1,23 +1,27 @@
 from typing import Dict, Generator, Optional
+
 from kubernetes.client import (
-    V1Deployment, V2HorizontalPodAutoscaler, V1PodDisruptionBudget
+    V1Deployment,
+    V1PodDisruptionBudget,
+    V2HorizontalPodAutoscaler,
 )
+
 from reslib.constants import K8DeploymentKind
 from reslib.k8s.client import KubernetesClient
-from reslib.k8s.status import (
-    current_cluster_name,
-    ready_replicas,
-    is_deployment_condition_true
-)
 from reslib.k8s.schema import (
     ClusterState,
-    NamespaceState,
-    WorkloadState,
-    WorkloadSpec,
-    WorkloadPolicies,
-    WorkloadStatus,
     HPAConfig,
+    NamespaceState,
     PDBConfig,
+    WorkloadPolicies,
+    WorkloadSpec,
+    WorkloadState,
+    WorkloadStatus,
+)
+from reslib.k8s.status import (
+    current_cluster_name,
+    is_deployment_condition_true,
+    ready_replicas,
 )
 
 __all__ = ["discover_namespaces", "discover_workloads", "discover_cluster"]
@@ -26,7 +30,7 @@ __all__ = ["discover_namespaces", "discover_workloads", "discover_cluster"]
 def _get_namespace_hpa_indexes(
     k8s: KubernetesClient,
     namespace: str,
-    kind: K8DeploymentKind = K8DeploymentKind.STATELESS
+    kind: K8DeploymentKind = K8DeploymentKind.STATELESS,
 ) -> Dict[str, V2HorizontalPodAutoscaler]:
     """
     Build a mapping of deployment name -> HPA object for a namespace.
@@ -62,9 +66,7 @@ def _get_namespace_pdb_indexes(
     Returns:
         Dict mapping deployment names to their PDB objects.
     """
-    pdbs = k8s.policy.list_namespaced_pod_disruption_budget(
-        namespace=namespace
-    ).items
+    pdbs = k8s.policy.list_namespaced_pod_disruption_budget(namespace=namespace).items
     return {
         pdb.spec.selector.match_labels.get("app", pdb.metadata.name): pdb
         for pdb in pdbs
@@ -93,10 +95,13 @@ def _build_workload_spec(
         name=dep_name,
         kind=K8DeploymentKind.STATELESS.value,  # Can be extended to detect stateful
         replicas=deployment.spec.replicas or 0,
-        hpa=HPAConfig(
-            min_replicas=hpa.spec.min_replicas,
-            max_replicas=hpa.spec.max_replicas
-        ) if hpa else None,
+        hpa=(
+            HPAConfig(
+                min_replicas=hpa.spec.min_replicas, max_replicas=hpa.spec.max_replicas
+            )
+            if hpa
+            else None
+        ),
     )
 
 
@@ -117,10 +122,14 @@ def _build_workload_policies(
     pdb = pdb_index.get(dep_name)
 
     return WorkloadPolicies(
-        pdb=PDBConfig(
-            min_available=pdb.spec.min_available,
-            max_unavailable=pdb.spec.max_unavailable
-        ) if pdb else None
+        pdb=(
+            PDBConfig(
+                min_available=pdb.spec.min_available,
+                max_unavailable=pdb.spec.max_unavailable,
+            )
+            if pdb
+            else None
+        )
     )
 
 
@@ -148,9 +157,7 @@ def _build_workload_status(deployment: V1Deployment) -> WorkloadStatus:
 
 
 def discover_workloads(
-    k8s_client: KubernetesClient,
-    namespace: str,
-    labels: Optional[str] = None
+    k8s_client: KubernetesClient, namespace: str, labels: Optional[str] = None
 ) -> Generator[WorkloadState, None, None]:
     """
     Yield all workloads in a namespace with spec, policies, and current status.
@@ -182,7 +189,7 @@ def discover_workloads(
 
 
 def discover_namespaces(
-    k8s_client: KubernetesClient
+    k8s_client: KubernetesClient,
 ) -> Generator[NamespaceState, None, None]:
     """
     Yield all namespaces in the cluster, each with its workloads.
@@ -196,8 +203,7 @@ def discover_namespaces(
     namespaces = k8s_client.v1_api.list_namespace().items
     for ns in namespaces:
         ns_state = NamespaceState(
-            name=ns.metadata.name,
-            labels=ns.metadata.labels or {}
+            name=ns.metadata.name, labels=ns.metadata.labels or {}
         )
         for workload in discover_workloads(k8s_client, ns.metadata.name):
             ns_state.workloads[workload.spec.name] = workload

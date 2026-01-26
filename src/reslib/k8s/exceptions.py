@@ -1,4 +1,3 @@
-
 class WorkloadNotFound(Exception):
     pass
 

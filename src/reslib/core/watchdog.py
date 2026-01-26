@@ -1,12 +1,12 @@
 import asyncio
-from typing import List, Coroutine, Any
+from typing import Any, Coroutine, List
 
 
 async def monitor_tasks(
     watch_tasks: List[Coroutine[Any, Any, Any]],
     timeout: float = 30.0,
     return_when: str = asyncio.FIRST_EXCEPTION,
-    raise_exception: bool = True
+    raise_exception: bool = True,
 ) -> List[asyncio.Task[Any]]:
     """
     Run multiple coroutines concurrently and monitor their completion.

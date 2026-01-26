@@ -1,6 +1,7 @@
 from pydantic import BaseModel, model_validator
-from reslib.k8s.schema import WorkloadState
+
 from reslib.k8s.exceptions import WorkloadReconcilingError
+from reslib.k8s.schema import WorkloadState
 
 
 class WorkloadHealthPolicy(BaseModel):
