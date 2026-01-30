@@ -1,6 +1,11 @@
 from pydantic import BaseModel, model_validator
 
-from reslib.k8s.exceptions import WorkloadReconcilingError
+from reslib.k8s.exceptions import (
+    WorkloadFaultyError,
+    WorkloadNotAvailableError,
+    WorkloadReconcilingError,
+    WorkloadStatusUnavailableError,
+)
 from reslib.k8s.schema import WorkloadState
 
 
@@ -32,7 +37,7 @@ class WorkloadHealthPolicy(BaseModel):
         status = self.workload.status
 
         if not status:
-            raise WorkloadReconcilingError(
+            raise WorkloadStatusUnavailableError(
                 f"Workload '{self.workload.spec.name}' status is unavailable"
             )
 
@@ -41,9 +46,12 @@ class WorkloadHealthPolicy(BaseModel):
                 f"Workload '{self.workload.spec.name}' is currently reconciling"
             )
 
-        if status.serving_traffic is False:
-            raise WorkloadReconcilingError(
-                f"Workload '{self.workload.spec.name}' is not serving traffic"
+        if not status.is_available:
+            raise WorkloadNotAvailableError(
+                f"Workload '{self.workload.spec.name}' is not available/stable"
             )
+
+        if status.is_faulty:
+            raise WorkloadFaultyError(f"Workload '{self.workload.spec.name}' is faulty")
 
         return self

@@ -2,10 +2,12 @@ import asyncio
 import logging
 from typing import Optional
 
-from reslib.constants import AsyncFunc
+from reslib import helpers as h
+from reslib.constants import AsyncFunc, EventEnum
 from reslib.runtime.phases import ExecutionPhase
 from reslib.runtime.resolve import resolve
 from reslib.schemas.scenario import ObserverSpec
+from reslib.schemas.telemetry import EventPayload
 
 logger = logging.getLogger(__name__)
 
@@ -26,8 +28,9 @@ class ObserverContext:
             await terminate_pods()
     """
 
-    def __init__(self, spec: ObserverSpec):
+    def __init__(self, telemetry, spec: ObserverSpec):
         self.spec = spec
+        self.telemetry: h.BaseTelemetry = telemetry
         self._task: Optional[asyncio.Task] = None
 
     async def _observer_loop(self):
@@ -36,7 +39,7 @@ class ObserverContext:
             phase=ExecutionPhase.OBSERVER, name=self.spec.name
         )
         while True:
-            await observer_func(**self.spec.kwargs)
+            await observer_func(**self.spec.kwargs, telemetry=self.telemetry)
             await asyncio.sleep(self.spec.sampling_interval)
 
     async def start(self) -> None:
@@ -47,6 +50,14 @@ class ObserverContext:
         and the scenario execution is aborted.
         """
         logger.info("Starting observer: %s", self.spec.name)
+        self.telemetry.emit_event(
+            event=EventPayload(
+                event_name=EventEnum.OBSERVER_STARTED,
+                phase=ExecutionPhase.OBSERVER,
+                observer_name=self.spec.name,
+            )
+        )
+
         self._task = asyncio.create_task(
             self._observer_loop(),
             name=f"observer:{self.spec.name}",
@@ -65,6 +76,14 @@ class ObserverContext:
         if self._task.done():
             exc = self._task.exception()
             if exc:
+                self.telemetry.emit_event(
+                    event=EventPayload(
+                        event_name=EventEnum.OBSERVER_FAILED,
+                        phase=ExecutionPhase.OBSERVER,
+                        observer_name=self.spec.name,
+                        details=str(exc),
+                    )
+                )
                 raise exc
 
     async def stop(self) -> None:
@@ -88,6 +107,13 @@ class ObserverContext:
         except asyncio.CancelledError:
             logger.debug("Observer task %s cancelled", self.spec.name)
         finally:
+            self.telemetry.emit_event(
+                event=EventPayload(
+                    event_name=EventEnum.OBSERVER_STOPPED,
+                    phase=ExecutionPhase.OBSERVER,
+                    observer_name=self.spec.name,
+                )
+            )
             self._task = None
 
     async def __aenter__(self) -> "ObserverContext":

@@ -1,6 +1,6 @@
 from reslib.guardrails.schema import ValidatePodTerminationGuardrailArgs
 from reslib.k8s.schema import WorkloadState
-from reslib.k8s.utils import get_single_workload
+from reslib.k8s.utils import get_workload
 from reslib.policies.availability import MinAvailabilityPolicy
 from reslib.policies.pdb import PodDisruptionBudgetPolicy
 from reslib.policies.workload import WorkloadHealthPolicy
@@ -29,7 +29,7 @@ async def validate_pod_termination_guardrail(**kwargs) -> None:
         mode: Selection mode, either "absolute" or "percentage".
         respect_pdb: Whether to enforce PodDisruptionBudget rules (default True).
         min_remaining_replicas: Minimum pods that must remain after termination.
-        event_recorder: Optional recorder to log events or metrics.
+        event_handler: Optional recorder to log events or metrics.
 
     Raises:
         WorkloadNotFound: If no workloads match the label selector.
@@ -40,10 +40,7 @@ async def validate_pod_termination_guardrail(**kwargs) -> None:
     args = ValidatePodTerminationGuardrailArgs(**kwargs)
 
     # Discover workloads
-    workload: WorkloadState = get_single_workload(
-        namespace=args.namespace, labels=args.labels
-    )
-
+    workload: WorkloadState = get_workload(namespace=args.namespace, name=args.workload)
     # Resolve quantity to terminate
     selection = QuantitySelection(mode=args.mode, amount=args.quantity)
     pods_to_terminate = selection.with_total(workload.status.ready_replicas)
@@ -60,13 +57,8 @@ async def validate_pod_termination_guardrail(**kwargs) -> None:
 
     # Apply PodDisruptionBudgetPolicy if requested
     if args.respect_pdb:
-        pdb_min_available = (
-            workload.policies.pdb.min_available
-            if workload.policies and workload.policies.pdb
-            else 0
-        )
-
-        PodDisruptionBudgetPolicy(
-            remaining=workload.status.ready_replicas - pods_to_terminate,
-            pdb_min_available=pdb_min_available,
-        )
+        if workload.policies and workload.policies.pdb:
+            PodDisruptionBudgetPolicy(
+                remaining_pods=workload.status.ready_replicas - pods_to_terminate,
+                pdb_min_available=workload.policies.pdb.min_available,
+            )

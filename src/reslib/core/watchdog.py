@@ -46,10 +46,11 @@ async def monitor_tasks(
         task.cancel()
 
     # Raise first exception if requested
-    for task in done:
-        exc = task.exception()
-        if exc and raise_exception:
-            raise exc
+    if raise_exception:
+        for task in done:
+            exc = task.exception()
+            if exc:
+                raise exc
 
     # Raise timeout if there are still pending tasks
     if pending:

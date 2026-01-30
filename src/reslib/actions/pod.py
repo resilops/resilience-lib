@@ -12,7 +12,7 @@ from reslib.k8s.exceptions import PodDeletionTimeoutError, PodsSelectionError
 from reslib.k8s.schema import WorkloadState
 from reslib.k8s.utils import (
     get_pod_termination_timeout,
-    get_single_workload,
+    get_workload,
     pod_exists,
 )
 from reslib.schemas.validators import QuantitySelection
@@ -54,15 +54,15 @@ async def terminate_pods(**kwargs) -> None:
     Steps:
       1. Validate and parse arguments using `TerminatePodsArgs`.
       2. Determine the number of pods to terminate based on ready replicas.
-      3. Select running pods matching the label selector.
+      3. Select running pods matching the workload name.
       4. Delete pods concurrently and wait for all to finish.
 
     Expected keyword arguments (`**kwargs`):
         namespace (str): Kubernetes namespace of the workload.
-        labels (str): Label selector for identifying pods.
+        workload (str): Name of the deployment/workload
         quantity (int): Number of pods to terminate.
         mode (QuantitySelectionModeEnum): Selection mode ('absolute' or 'percentage').
-        event_recorder (BaseEventRecorder, optional): Recorder to log metrics/events.
+        event_handler (BaseEventRecorder, optional): Recorder to log metrics/events.
 
     Raises:
         PodsSelectionError: If no pods are selected or no running pods are found.
@@ -72,9 +72,7 @@ async def terminate_pods(**kwargs) -> None:
     args = TerminatePodsArgs(**kwargs)
 
     # 1. Discover workload
-    workload: WorkloadState = get_single_workload(
-        namespace=args.namespace, labels=args.labels
-    )
+    workload: WorkloadState = get_workload(namespace=args.namespace, name=args.workload)
 
     # 2. Determine pods to terminate
     selection = QuantitySelection(mode=args.mode, amount=args.quantity)
@@ -82,13 +80,21 @@ async def terminate_pods(**kwargs) -> None:
 
     if pods_to_terminate <= 0:
         raise PodsSelectionError(
-            f"No pods to terminate for workload {args.namespace}/{args.labels}"
+            f"Pods to terminate: {pods_to_terminate}. "
+            f"Either change percentage or use absolute quantity"
         )
 
     # 3. List candidate pods
     k8s = KubernetesClient()
+    deployment = k8s.apps.read_namespaced_deployment(
+        name=args.workload,
+        namespace=args.namespace,
+    )
     pod_list = k8s.v1_api.list_namespaced_pod(
-        namespace=args.namespace, label_selector=args.labels
+        namespace=args.namespace,
+        label_selector=",".join(
+            f"{k}={v}" for k, v in deployment.spec.selector.match_labels.items()
+        ),
     )
     candidate_pods: List[V1Pod] = [
         pod for pod in pod_list.items if pod.status.phase == POD_RUNNING_STATUS
@@ -96,7 +102,7 @@ async def terminate_pods(**kwargs) -> None:
 
     if not candidate_pods:
         raise PodsSelectionError(
-            f"No running pods found to terminate for {args.namespace}/{args.labels}"
+            f"No running pods found to terminate for {args.namespace}/{args.workload}"
         )
 
     # 4. Terminate pods concurrently

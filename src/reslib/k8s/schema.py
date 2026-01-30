@@ -47,15 +47,15 @@ class WorkloadStatus(BaseModel):
     """Observed runtime state of a workload, used for stability checks."""
 
     ready_replicas: int = Field(..., ge=0, description="Number of ready replicas")
-    serving_traffic: Optional[bool] = Field(
-        default=None, description="Whether the workload is currently serving traffic"
+    is_available: Optional[bool] = Field(
+        default=None, description="Whether the workload is currently available"
     )
     reconciling: Optional[bool] = Field(
         default=None,
-        description=(
-            "Whether Kubernetes is actively reconciling this "
-            "workload (rollout or scaling)"
-        ),
+        description="Whether Kubernetes is actively reconciling",
+    )
+    is_faulty: Optional[bool] = Field(
+        default=None, description="True if kubernetes deployment is faulty"
     )
     restart_events: int = Field(
         default=0,

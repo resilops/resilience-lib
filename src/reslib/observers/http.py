@@ -1,32 +1,51 @@
 import asyncio
 import time
-from typing import Any, Tuple
+from typing import Optional, Tuple
 
 import httpx
 
-from reslib.constants import ReslibEventEnum
+from reslib import helpers as h
+from reslib.constants import MetricsEnum
+from reslib.core.watchdog import monitor_tasks
 from reslib.k8s.schema import WorkloadState
-from reslib.k8s.utils import get_single_workload
+from reslib.k8s.utils import get_workload
 from reslib.observers.schema import MeasureHTTPLatencyArgs
-from reslib.runtime.phases import ExecutionPhase
-from reslib.schemas.event import ResLibEventPayload
+from reslib.schemas.telemetry import MetricsPayload
+
+
+def _emit_metrics(
+    *,
+    workload: WorkloadState,
+    telemetry: h.BaseTelemetry,
+    response: Optional[httpx.Response] = None,
+    latency: Optional[float] = None,
+    error: Optional[Exception] = None,
+):
+    """Emit a single observer metric with optional error or latency info."""
+    metrics = MetricsPayload(
+        metrics_name=MetricsEnum.HTTP,
+        function="measure_http_latency",
+        workload_state=workload.model_dump(),
+    )
+
+    if response:
+        metrics.status_code = response.status_code
+        metrics.latency = latency
+
+    if error:
+        metrics.is_error = True
+        metrics.details = str(error)
+
+    telemetry.emit_metrics(metrics=metrics)
 
 
 async def _send_timed_request(
-    *, client: httpx.AsyncClient, endpoint: str
+    client: httpx.AsyncClient, endpoint: str
 ) -> Tuple[httpx.Response, float]:
     """
-    Send an HTTP GET request and measure the total request latency.
+    Send an HTTP GET request and measure latency.
 
-    Args:
-        client: Shared AsyncClient instance.
-        endpoint: Full HTTP endpoint URL.
-
-    Returns:
-        A tuple of (httpx.Response, latency_in_seconds).
-
-    Raises:
-        httpx.HTTPError: Propagates any request-related errors.
+    Raises exceptions directly — they will be handled after requests complete.
     """
     start = time.perf_counter()
     response = await client.get(endpoint)
@@ -40,55 +59,44 @@ async def measure_http_latency(**kwargs) -> None:
 
     Steps:
         1. Parse and validate arguments via `MeasureHTTPLatencyArgs`.
-        2. Send multiple concurrent HTTP GET requests to the specified endpoint.
-        3. Measure latency and capture any request errors.
-        4. Fetch workload state after requests complete.
-        5. Emit one event per request with latency and workload state.
-
-    Expected keyword arguments (`**kwargs`):
-        namespace: Kubernetes namespace of the workload.
-        labels: Label selector identifying the workload.
-        endpoint: Full HTTP URL to probe (e.g., http://service/health).
-        timeout: Per-request timeout in seconds.
-        requests_per_interval: Number of parallel requests to send.
-        event_recorder: Recorder used to emit observer metrics.
+        2. Send multiple concurrent HTTP GET requests to the endpoint.
+        3. Fetch workload state *after* requests complete.
+        4. Emit one event per request with latency or error information.
 
     Raises:
-        WorkloadNotFound: If no workloads match the selector.
-        MultipleWorkloadsReturned: If more than one workload matches.
+        WorkloadNotFound, MultipleWorkloadsReturned, TimeoutError, Exception
     """
     args = MeasureHTTPLatencyArgs(**kwargs)
 
-    # 1. Send requests concurrently
     async with httpx.AsyncClient(timeout=args.timeout) as client:
-        tasks = [
+        # 1. Build request coroutines
+        watch_tasks = [
             _send_timed_request(client=client, endpoint=args.endpoint)
             for _ in range(args.requests_per_interval)
         ]
-        responses: Tuple[BaseException | Any] = await asyncio.gather(
-            *tasks, return_exceptions=True
+
+        # 2. Execute all tasks concurrently, do not propagate exceptions except timeout
+        completed_tasks = await monitor_tasks(
+            watch_tasks=watch_tasks,
+            timeout=args.timeout * args.requests_per_interval,
+            return_when=asyncio.FIRST_EXCEPTION,
+            raise_exception=False,
         )
 
-    # 2. Fetch workload state *after* requests complete
-    workload: WorkloadState = get_single_workload(
-        namespace=args.namespace, labels=args.labels
-    )
+    # 3. Fetch workload state AFTER requests finish
+    workload: WorkloadState = get_workload(namespace=args.namespace, name=args.workload)
 
-    # 3. Emit observer events
-    for response in responses:
-        event = ResLibEventPayload(
-            event_name=ReslibEventEnum.OBSERVER_METRICS,
-            phase=ExecutionPhase.OBSERVER,
-            workload_state=workload.model_dump(),
-            observer_name="http_latency_with_state",
-        )
-
-        if isinstance(response, Exception):
-            event.is_error = True
-            event.error_msg = str(response)
-        else:
-            response_obj, latency = response
-            event.status_code = response_obj.status_code
-            event.latency = latency
-
-        args.event_recorder.record(event=event)
+    # 4. Emit events for each completed request
+    for task in completed_tasks:
+        try:
+            response, latency = task.result()
+            _emit_metrics(
+                workload=workload,
+                response=response,
+                latency=latency,
+                telemetry=args.telemetry,
+            )
+        except Exception as exc:
+            # Already handled by monitor_tasks raising, just send metrics
+            _emit_metrics(workload=workload, error=exc, telemetry=args.telemetry)
+            raise

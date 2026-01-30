@@ -15,7 +15,7 @@ async def wait_for_workload_stability(**kwargs) -> None:
         namespace (str): Kubernetes namespace of the workload.
         labels (str): Label selector to identify the workload.
         wait_period (int, optional): Seconds to wait for stability (default 60, min 10).
-        event_recorder (BaseEventRecorder, optional): Recorder to log metrics/events.
+        event_handler (BaseEventRecorder, optional): Recorder to log metrics/events.
 
     Example:
         await wait_for_workload_stability(namespace="abc", labels="app=myapp")

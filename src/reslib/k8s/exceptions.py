@@ -2,11 +2,19 @@ class WorkloadNotFound(Exception):
     pass
 
 
-class MultipleWorkloadsReturned(Exception):
+class WorkloadStatusUnavailableError(Exception):
     pass
 
 
 class WorkloadReconcilingError(Exception):
+    pass
+
+
+class WorkloadFaultyError(Exception):
+    pass
+
+
+class WorkloadNotAvailableError(Exception):
     pass
 
 

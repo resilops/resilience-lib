@@ -5,13 +5,11 @@ from kubernetes import config as k8sconfig
 
 from reslib import helpers as h
 from reslib.config import config
-from reslib.constants import AsyncFunc, ReslibEventEnum
+from reslib.constants import AsyncFunc, EventEnum
 from reslib.core.context import ObserverContext
-from reslib.exceptions import PhaseExecutionFailed
 from reslib.logging import setup_logging
 from reslib.runtime.phases import ExecutionPhase
 from reslib.runtime.resolve import resolve
-from reslib.schemas.event import ResLibEventPayload
 from reslib.schemas.scenario import (
     ActionSpec,
     BaseOptionalSpec,
@@ -20,6 +18,7 @@ from reslib.schemas.scenario import (
     ObserverSpec,
     RollbackSpec,
 )
+from reslib.schemas.telemetry import EventPayload
 
 logger = logging.getLogger(__name__)
 
@@ -47,9 +46,9 @@ def _lib_setup() -> None:
 async def _execute_phase(
     spec: BaseSpec | BaseOptionalSpec,
     phase: ExecutionPhase,
-    event_recorder: h.BaseEventRecorder,
-    success_event: ReslibEventEnum,
-    failure_event: ReslibEventEnum,
+    success_event: EventEnum,
+    failure_event: EventEnum,
+    telemetry: h.BaseTelemetry,
 ) -> None:
     """
     Execute a single resilience phase and record its outcome.
@@ -63,28 +62,27 @@ async def _execute_phase(
     Args:
         spec: Phase specification containing handler name and arguments.
         phase: Execution phase used to resolve the handler.
-        event_recorder: Recorder used to log phase execution events.
         success_event: Event recorded when the phase succeeds.
         failure_event: Event recorded when the phase fails.
+        telemetry: Recorder used to log phase execution events and metrics.
     """
     if not spec.name:
         return
 
-    logger.info(f"Executing phase: {phase.name}")
-
+    error: Optional[Exception] = None
     try:
         func: AsyncFunc = resolve(phase=phase, name=spec.name)
-        await func(**spec.kwargs, event_recorder=event_recorder)
-        event_recorder.record(
-            event=ResLibEventPayload(event_name=success_event, phase=phase)
-        )
+        await func(**spec.kwargs, telemetry=telemetry)
     except Exception as exc:
-        event_recorder.record(
-            event=ResLibEventPayload(
-                event_name=failure_event, phase=phase, is_error=True, error_msg=str(exc)
-            )
+        error = exc
+        raise exc
+    finally:
+        event = EventPayload(
+            event_name=failure_event if error else success_event,
+            phase=phase,
+            details=str(error) if error else None,
         )
-        raise PhaseExecutionFailed(f"Error executing phase: {phase.name}") from exc
+        telemetry.emit_event(event=event)
 
 
 async def execute_resilience_scenario(
@@ -93,7 +91,7 @@ async def execute_resilience_scenario(
     observer: Dict[str, Any],
     guardrail: Optional[Dict[str, Any]] = None,
     rollback: Optional[Dict[str, Any]] = None,
-    event_recorder: Optional[h.BaseEventRecorder] = None,
+    telemetry: Optional[h.BaseTelemetry] = None,
 ) -> None:
     """
     Execute a full resilience scenario.
@@ -111,10 +109,10 @@ async def execute_resilience_scenario(
         observer: Definition of the observer used to monitor behavior.
         guardrail: Optional definition of precondition checks.
         rollback: Optional definition of rollback behavior.
-        event_recorder: Recorder used to emit lifecycle and result events.
+        telemetry: Telemetry recorder used to emit lifecycle and result events/metrics.
     """
     _lib_setup()
-    event_recorder = event_recorder or h.NoopEventRecorder()
+    telemetry = telemetry or h.NoopTelemetry()
 
     action_spec = ActionSpec(**action)
     observer_spec = ObserverSpec(**observer)
@@ -125,25 +123,24 @@ async def execute_resilience_scenario(
     await _execute_phase(
         spec=guardrail_spec,
         phase=ExecutionPhase.GUARDRAIL,
-        event_recorder=event_recorder,
-        success_event=ReslibEventEnum.GUARDRAIL_SUCCESS,
-        failure_event=ReslibEventEnum.GUARDRAIL_FAILED,
+        success_event=EventEnum.GUARDRAIL_SUCCESS,
+        failure_event=EventEnum.GUARDRAIL_FAILED,
+        telemetry=telemetry,
     )
 
     # 2. Action + Observation + Rollback
-    async with ObserverContext(observer_spec):
+    async with ObserverContext(telemetry=telemetry, spec=observer_spec):
         await _execute_phase(
             spec=action_spec,
             phase=ExecutionPhase.ACTION,
-            event_recorder=event_recorder,
-            success_event=ReslibEventEnum.ACTION_SUCCESS,
-            failure_event=ReslibEventEnum.ACTION_FAILED,
+            success_event=EventEnum.ACTION_SUCCESS,
+            failure_event=EventEnum.ACTION_FAILED,
+            telemetry=telemetry,
         )
-
         await _execute_phase(
             spec=rollback_spec,
             phase=ExecutionPhase.ROLLBACK,
-            event_recorder=event_recorder,
-            success_event=ReslibEventEnum.ROLLBACK_SUCCESS,
-            failure_event=ReslibEventEnum.ROLLBACK_FAILED,
+            success_event=EventEnum.ROLLBACK_SUCCESS,
+            failure_event=EventEnum.ROLLBACK_FAILED,
+            telemetry=telemetry,
         )

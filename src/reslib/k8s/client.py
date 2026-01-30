@@ -16,8 +16,8 @@ class KubernetesClient:
         return client.AppsV1Api(self.api)
 
     @property
-    def autoscaling(self) -> client.AutoscalingV1Api:
-        return client.AutoscalingV1Api(self.api)
+    def autoscaling(self) -> client.AutoscalingV2Api:
+        return client.AutoscalingV2Api(self.api)
 
     @property
     def policy(self) -> client.PolicyV1Api:

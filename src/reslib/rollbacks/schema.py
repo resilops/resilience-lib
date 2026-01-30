@@ -14,11 +14,11 @@ class WaitForWorkloadStabilityArgs(BaseModel):
     model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
 
     namespace: str = Field(..., description="Kubernetes namespace of the workload.")
-    labels: str = Field(..., description="Label selector to identify the workload.")
+    workload: str = Field(..., description="Name of the workload")
     wait_period: int = Field(
         60, ge=10, description="Number of seconds to wait for workload stability."
     )
-    event_recorder: h.BaseEventRecorder = Field(
-        default_factory=h.NoopEventRecorder,
-        description="Async recorder used to emit metrics or status events.",
+    telemetry: h.BaseTelemetry = Field(
+        default_factory=h.NoopTelemetry,
+        description="Telemetry recorder to log metrics.",
     )
