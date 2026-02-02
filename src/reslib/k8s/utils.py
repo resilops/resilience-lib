@@ -309,7 +309,7 @@ def calculate_cpu_pods_to_stress_count(
         HpaNotConfiguredError: If the metric does not define 'averageUtilization'.
     """
     target: dict = metric.resource.get("target", {})
-    average_utilization = target.get("averageUtilization")
+    average_utilization = target.get("average_utilization")
 
     if average_utilization is None:
         raise HpaNotConfiguredError(

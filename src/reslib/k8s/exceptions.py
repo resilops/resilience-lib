@@ -48,3 +48,7 @@ class HpaMetricsNotFoundError(Exception):
 
 class PodsToStressExceededError(Exception):
     pass
+
+
+class CPUStressCommandFailed(Exception):
+    pass

@@ -73,9 +73,9 @@ async def validate_hpa_cpu_scaling_guardrail(**kwargs) -> None:
         workload=workload,
         metric_type=args.metric_type,
         resource=args.resource,
-        idle_cpu_percent=args.pod_idle_cpu_percent,
-        stress_cpu_percent=args.pod_stress_cpu_percent,
-        min_idle=args.pod_min_idle,
+        idle_cpu_percent=args.idle_cpu_percent,
+        stress_cpu_percent=args.stress_cpu_percent,
+        min_idle=args.min_idle,
     )
 
     # Ensure workload is not already at HPA max replicas

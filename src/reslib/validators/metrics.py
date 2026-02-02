@@ -1,6 +1,7 @@
 from typing import List
 
 from kubernetes.client import V1Deployment, V1Pod
+from kubernetes.client.rest import ApiException
 
 from reslib.k8s.client import KubernetesClient
 from reslib.k8s.exceptions import MetricsServerUnavailableError
@@ -27,23 +28,30 @@ def ensure_metrics_server_available(
 
     Raises:
         MetricsServerUnavailableError: If no pods or metrics are available for
-            the deployment.
+            the deployment, or if access is forbidden.
     """
     pods = get_deployment_pods(k8s=k8s, namespace=namespace, deployment=deployment)
-    if not pods:
-        raise MetricsServerUnavailableError(
-            f"No pods found for workload '{deployment.metadata.name}' "
-            f"in namespace '{namespace}'."
-        )
+    pod_name = pods[0].metadata.name
 
-    # Check metrics for the first pod as a proxy for metrics server availability
-    metrics = k8s.custom.get_namespaced_custom_object(
-        group="metrics.k8s.io",
-        version="v1beta1",
-        namespace=namespace,
-        plural="pods",
-        name=pods[0].metadata.name,
-    )
+    try:
+        metrics = k8s.custom.get_namespaced_custom_object(
+            group="metrics.k8s.io",
+            version="v1beta1",
+            namespace=namespace,
+            plural="pods",
+            name=pod_name,
+        )
+    except ApiException as e:
+        # Catch forbidden, not found, or other API errors
+        raise MetricsServerUnavailableError(
+            f"Cannot access metrics for pod '{pod_name}' in namespace '{namespace}': "
+            f"{e.reason} (HTTP {e.status})"
+        ) from e
+    except Exception as e:
+        raise MetricsServerUnavailableError(
+            f"Unexpected error while querying metrics for pod '{pod_name}' "
+            f"in namespace '{namespace}': {str(e)}"
+        ) from e
 
     if not metrics.get("containers"):
         raise MetricsServerUnavailableError(

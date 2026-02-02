@@ -106,7 +106,7 @@ def validate_pods_to_stress_cpu(
     Raises:
         PodsToStressExceededError: If calculated pods to stress exceeds allowable limit.
     """
-    hpa_metric = validate_hpa_resource_metric(
+    hpa_metric = get_hpa_resource_metric(
         hpa=workload.spec.hpa, metric_type=metric_type, resource=resource
     )
 

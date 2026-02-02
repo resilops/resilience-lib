@@ -14,6 +14,7 @@ from reslib.constants import (
 )
 from reslib.core.watchdog import monitor_tasks
 from reslib.k8s.client import KubernetesClient
+from reslib.k8s.exceptions import CPUStressCommandFailed
 from reslib.k8s.schema import HPAMetricSpec, WorkloadState
 from reslib.k8s.utils import (
     calculate_cpu_pods_to_stress_count,
@@ -24,6 +25,54 @@ from reslib.k8s.utils import (
 from reslib.schemas.hpa import HpaCPUStressArgsTemplate
 
 logger = logging.getLogger(__name__)
+
+STDOUT_CHANNEL = 1
+STDERR_CHANNEL = 2
+
+
+def _run_stress_command(
+    k8s: KubernetesClient,
+    pod: V1Pod,
+    command: list[str],
+    container: Optional[str],
+    timeout: int,
+) -> tuple[str, str]:
+    """
+    Blocking function to run a stress command via Kubernetes exec.
+
+    Returns stdout and stderr from the pod.
+    Raises CPUStressCommandFailed if exec fails.
+    """
+    try:
+        resp = stream.stream(
+            k8s.v1_api.connect_get_namespaced_pod_exec,
+            name=pod.metadata.name,
+            namespace=pod.metadata.namespace,
+            container=container,
+            command=command,
+            stderr=True,
+            stdin=False,
+            stdout=True,
+            tty=False,
+            _preload_content=False,
+        )
+
+        resp.run_forever(timeout=timeout)
+        stdout = resp.read_channel(STDOUT_CHANNEL)
+        stderr = resp.read_channel(STDERR_CHANNEL).strip()
+
+        if stderr:
+            raise CPUStressCommandFailed(
+                f"Pod {pod.metadata.name} container={container} "
+                f"failed. Reason: {stderr}"
+            )
+
+        return stdout, stderr
+    except Exception as e:
+        raise CPUStressCommandFailed(
+            f"Pod {pod.metadata.name} container={container} failed to start stress-ng. "
+            f"Reason: {str(e)}"
+        ) from e
 
 
 async def _apply_cpu_stress(
@@ -61,17 +110,18 @@ async def _apply_cpu_stress(
         f"{duration_seconds}s",
     ]
 
-    stream.stream(
-        k8s.v1_api.connect_get_namespaced_pod_exec,
-        name=pod.metadata.name,
-        namespace=pod.metadata.namespace,
-        container=container,
-        command=command,
-        stderr=True,
-        stdin=False,
-        stdout=True,
-        tty=False,
+    logger.info(
+        f"Running stress command for pod: {pod.metadata.name} container={container}"
     )
+    await asyncio.to_thread(
+        _run_stress_command,
+        k8s,
+        pod,
+        command,
+        container,
+        duration_seconds + POD_STRESS_DURATION_BUFFER,
+    )
+    logger.info(f"Stress finished for pod: {pod.metadata.name} container={container}")
 
 
 async def stress_cpu_hpa(**kwargs):
@@ -136,8 +186,8 @@ async def stress_cpu_hpa(**kwargs):
             k8s=k8s,
             pod=pod,
             cpu_percent=args.stress_cpu_percent,
-            duration_seconds=args.stress_duration + POD_STRESS_DURATION_BUFFER,
-            container=args.container_name,  # optional: app or sidecar container
+            duration_seconds=args.stress_duration,
+            container=args.container,  # optional: app or sidecar container
         )
         for pod in pods_to_stress
     ]
