@@ -1,3 +1,4 @@
+import math
 from functools import lru_cache
 from typing import List, Optional
 
@@ -5,11 +6,17 @@ from kubernetes.client import V1Deployment, V1Pod
 from kubernetes.client.exceptions import ApiException
 
 from reslib.config import config
-from reslib.constants import K8DeploymentKind
+from reslib.constants import (
+    POD_RUNNING_STATUS,
+    HpaMetricTypeEnum,
+    HpaResourceNameEnum,
+    K8DeploymentKind,
+)
 from reslib.k8s.client import KubernetesClient
-from reslib.k8s.exceptions import WorkloadNotFound
+from reslib.k8s.exceptions import HpaNotConfiguredError, WorkloadNotFound
 from reslib.k8s.schema import (
     HPAConfig,
+    HPAMetricSpec,
     PDBConfig,
     WorkloadPolicies,
     WorkloadSpec,
@@ -76,6 +83,10 @@ def build_workload_spec(
             HPAConfig(
                 min_replicas=hpa.spec.min_replicas,
                 max_replicas=hpa.spec.max_replicas,
+                metrics=[
+                    HPAMetricSpec(type=m.type, resource=m.resource.to_dict())
+                    for m in (hpa.spec.metrics or [])
+                ],
             )
             if hpa
             else None
@@ -221,3 +232,94 @@ def get_pod_termination_timeout(
     )
 
     return min(max_grace + buffer_seconds, max_timeout)
+
+
+def get_hpa_resource_metric(
+    hpa: HPAConfig,
+    metric_type: HpaMetricTypeEnum,
+    resource: HpaResourceNameEnum,
+) -> Optional[HPAMetricSpec]:
+    """
+    Return the HPA metric matching the given metric type and resource.
+
+    Args:
+        hpa: HPA configuration containing metric specifications.
+        metric_type: HPA metric type (e.g. RESOURCE).
+        resource: Resource name (CPU or MEMORY).
+
+    Returns:
+        The matching HPAMetricSpec if found, otherwise None.
+    """
+    for metric in hpa.metrics:
+        if metric.type == metric_type and metric.resource.get("name") == resource.value:
+            return metric
+    return None
+
+
+def get_deployment_pods(
+    *,
+    k8s: KubernetesClient,
+    namespace: str,
+    deployment: V1Deployment,
+    pod_phase: str = POD_RUNNING_STATUS,
+) -> List[V1Pod]:
+    """
+    Return pods belonging to a workload filtered by pod phase.
+
+    Kwargs:
+        k8s: Kubernetes client wrapper.
+        namespace: Namespace where the workload is deployed.
+        deployment: Kubernetes Deployment object.
+        pod_phase: Pod phase to filter by (default: Running).
+
+    Returns:
+        List of pods matching the workload selector and pod phase.
+    """
+    selector = ",".join(
+        f"{key}={value}" for key, value in deployment.spec.selector.match_labels.items()
+    )
+
+    pods = k8s.v1_api.list_namespaced_pod(
+        namespace=namespace,
+        label_selector=selector,
+    )
+
+    return [pod for pod in pods.items if pod.status and pod.status.phase == pod_phase]
+
+
+def calculate_cpu_pods_to_stress_count(
+    workload: WorkloadState,
+    metric: HPAMetricSpec,
+    idle_cpu_percent: int,
+    stress_cpu_percent: int,
+) -> int:
+    """
+    Calculate how many pods need to be stressed to trigger HPA scale-up by one.
+
+    Args:
+        workload: The workload state containing current ready replicas.
+        metric: The HPA metric spec (CPU resource metric).
+        idle_cpu_percent: Idle CPU usage then there is no traffic
+        stress_cpu_percent: % of CPU needs to be stressed
+
+    Returns:
+        The number of pods that need to be stressed.
+
+    Raises:
+        HpaNotConfiguredError: If the metric does not define 'averageUtilization'.
+    """
+    target: dict = metric.resource.get("target", {})
+    average_utilization = target.get("averageUtilization")
+
+    if average_utilization is None:
+        raise HpaNotConfiguredError(
+            "Missing 'averageUtilization'. HPA is improperly configured."
+        )
+
+    replicas = workload.status.ready_replicas
+    pods_to_stress = math.ceil(
+        (replicas * average_utilization - replicas * idle_cpu_percent)
+        / (stress_cpu_percent - idle_cpu_percent)
+    )
+
+    return pods_to_stress

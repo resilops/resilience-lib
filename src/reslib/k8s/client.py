@@ -22,3 +22,7 @@ class KubernetesClient:
     @property
     def policy(self) -> client.PolicyV1Api:
         return client.PolicyV1Api(self.api)
+
+    @property
+    def custom(self) -> client.CustomObjectsApi:
+        return client.CustomObjectsApi()

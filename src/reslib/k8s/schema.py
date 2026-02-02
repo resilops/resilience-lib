@@ -1,9 +1,18 @@
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
-from reslib.constants import K8DeploymentKind
+from reslib.constants import HpaMetricTypeEnum, K8DeploymentKind
+
+
+class HPAMetricSpec(BaseModel):
+    """Horizontal Pod Autoscaler metrics."""
+
+    type: HpaMetricTypeEnum
+    resource: Dict[Any, Any] = Field(
+        default_factory=dict, description="HPA resource dict"
+    )
 
 
 class HPAConfig(BaseModel):
@@ -11,6 +20,7 @@ class HPAConfig(BaseModel):
 
     min_replicas: int = Field(..., ge=1, description="Minimum number of replicas")
     max_replicas: int = Field(..., ge=1, description="Maximum number of replicas")
+    metrics: List[HPAMetricSpec] = Field(..., description="HPA metrics")
 
 
 class PDBConfig(BaseModel):

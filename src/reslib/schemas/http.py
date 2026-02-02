@@ -3,7 +3,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from reslib import helpers as h
 
 
-class MeasureHTTPLatencyArgs(BaseModel):
+class HTTPLatencyArgsTemplate(BaseModel):
     """
     Arguments for the `measure_http_latency` function.
 

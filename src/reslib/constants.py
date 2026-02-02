@@ -9,6 +9,30 @@ DEPLOYMENT_STATUS_RS_AVAILABLE = "NewReplicaSetAvailable"
 DEPLOYMENT_STATUS_MIN_RS_AVAILABLE = "MinimumReplicasAvailable"
 DEPLOYMENT_STATUS_PROGRESS_DEADLINE = "ProgressDeadlineExceeded"
 
+POD_STRESS_DURATION_BUFFER: int = 10  # Stress 10 seconds more
+POD_STRESS_TASK_TIMEOUT_BUFFER: int = 30  # Timeout in stress duration + 30 seconds
+
+
+class HpaMetricTypeEnum(str, Enum):
+    RESOURCE = "Resource"
+    PODS = "Pods"
+    OBJECT = "Object"
+    EXTERNAL = "External"
+    CONTAINER_RESOURCE = "ContainerResource"
+
+
+class HpaResourceNameEnum(str, Enum):
+    CPU = "cpu"
+    MEMORY = "memory"
+
+
+SUPPORTED_HPA_METRIC_TYPES = {
+    HpaMetricTypeEnum.RESOURCE,
+}
+SUPPORTED_HPA_RESOURCE_NAMES = {
+    HpaResourceNameEnum.CPU,
+}
+
 
 class K8DeploymentKind(str, Enum):
     DEPLOYMENT = "Deployment"

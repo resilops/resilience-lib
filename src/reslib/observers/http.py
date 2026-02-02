@@ -9,7 +9,7 @@ from reslib.constants import MetricsEnum
 from reslib.core.watchdog import monitor_tasks
 from reslib.k8s.schema import WorkloadState
 from reslib.k8s.utils import get_workload
-from reslib.observers.schema import MeasureHTTPLatencyArgs
+from reslib.schemas.http import HTTPLatencyArgsTemplate
 from reslib.schemas.telemetry import MetricsPayload
 
 
@@ -66,7 +66,7 @@ async def measure_http_latency(**kwargs) -> None:
     Raises:
         WorkloadNotFound, MultipleWorkloadsReturned, TimeoutError, Exception
     """
-    args = MeasureHTTPLatencyArgs(**kwargs)
+    args = HTTPLatencyArgsTemplate(**kwargs)
 
     async with httpx.AsyncClient(timeout=args.timeout) as client:
         # 1. Build request coroutines

@@ -4,17 +4,17 @@ from typing import List
 
 from kubernetes.client import V1DeleteOptions, V1Pod
 
-from reslib.actions.schemas import TerminatePodsArgs
-from reslib.constants import POD_RUNNING_STATUS
 from reslib.core.watchdog import monitor_tasks
 from reslib.k8s.client import KubernetesClient
 from reslib.k8s.exceptions import PodDeletionTimeoutError, PodsSelectionError
 from reslib.k8s.schema import WorkloadState
 from reslib.k8s.utils import (
+    get_deployment_pods,
     get_pod_termination_timeout,
     get_workload,
     pod_exists,
 )
+from reslib.schemas.pod import PodTerminationArgsTemplate
 from reslib.schemas.validators import QuantitySelection
 
 logger = logging.getLogger(__name__)
@@ -68,8 +68,9 @@ async def terminate_pods(**kwargs) -> None:
         PodsSelectionError: If no pods are selected or no running pods are found.
         PodDeletionTimeoutError: If pod deletion does not complete within the timeout.
     """
+    logger.info("Starting pod termination")
     # Validate and normalize input arguments
-    args = TerminatePodsArgs(**kwargs)
+    args = PodTerminationArgsTemplate(**kwargs)
 
     # 1. Discover workload
     workload: WorkloadState = get_workload(namespace=args.namespace, name=args.workload)
@@ -77,6 +78,8 @@ async def terminate_pods(**kwargs) -> None:
     # 2. Determine pods to terminate
     selection = QuantitySelection(mode=args.mode, amount=args.quantity)
     pods_to_terminate = selection.with_total(workload.status.ready_replicas)
+
+    logger.info(f"Total pods to terminate is: {pods_to_terminate}")
 
     if pods_to_terminate <= 0:
         raise PodsSelectionError(
@@ -90,15 +93,9 @@ async def terminate_pods(**kwargs) -> None:
         name=args.workload,
         namespace=args.namespace,
     )
-    pod_list = k8s.v1_api.list_namespaced_pod(
-        namespace=args.namespace,
-        label_selector=",".join(
-            f"{k}={v}" for k, v in deployment.spec.selector.match_labels.items()
-        ),
-    )
-    candidate_pods: List[V1Pod] = [
-        pod for pod in pod_list.items if pod.status.phase == POD_RUNNING_STATUS
-    ][:pods_to_terminate]
+
+    pods = get_deployment_pods(k8s=k8s, namespace=args.namespace, deployment=deployment)
+    candidate_pods: List[V1Pod] = pods[:pods_to_terminate]
 
     if not candidate_pods:
         raise PodsSelectionError(
@@ -119,3 +116,5 @@ async def terminate_pods(**kwargs) -> None:
         raise PodDeletionTimeoutError(
             f"Timed out waiting for pods to be deleted in namespace '{args.namespace}'"
         )
+
+    logger.info("Pod termination successful")

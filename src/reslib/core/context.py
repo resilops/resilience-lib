@@ -40,7 +40,7 @@ class ObserverContext:
         )
         while True:
             await observer_func(**self.spec.kwargs, telemetry=self.telemetry)
-            await asyncio.sleep(self.spec.sampling_interval)
+            await asyncio.sleep(self.spec.config.sampling_interval)
 
     async def start(self) -> None:
         """
@@ -64,13 +64,13 @@ class ObserverContext:
         )
 
         # Allow observer to establish baseline
-        if self.spec.warmup_period > 0:
+        if self.spec.config.warmup_period > 0:
             logger.info(
                 "Observer %s warming up for %s seconds",
                 self.spec.name,
-                self.spec.warmup_period,
+                self.spec.config.warmup_period,
             )
-            await asyncio.sleep(self.spec.warmup_period)
+            await asyncio.sleep(self.spec.config.warmup_period)
 
         # Fail fast if observer, if there are any errors during warmup
         if self._task.done():
@@ -91,13 +91,13 @@ class ObserverContext:
         if not self._task:
             return
 
-        if self.spec.grace_period > 0:
+        if self.spec.config.grace_period > 0:
             logger.info(
                 "Observer %s continuing for grace period: %s seconds",
                 self.spec.name,
-                self.spec.grace_period,
+                self.spec.config.grace_period,
             )
-            await asyncio.sleep(self.spec.grace_period)
+            await asyncio.sleep(self.spec.config.grace_period)
 
         logger.info("Stopping observer: %s", self.spec.name)
         self._task.cancel()

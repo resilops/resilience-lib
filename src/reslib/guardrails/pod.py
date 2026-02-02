@@ -1,10 +1,15 @@
-from reslib.guardrails.schema import ValidatePodTerminationGuardrailArgs
+import logging
+
 from reslib.k8s.schema import WorkloadState
 from reslib.k8s.utils import get_workload
-from reslib.policies.availability import MinAvailabilityPolicy
-from reslib.policies.pdb import PodDisruptionBudgetPolicy
-from reslib.policies.workload import WorkloadHealthPolicy
+from reslib.schemas.pod import PodTerminationArgsTemplate
 from reslib.schemas.validators import QuantitySelection
+from reslib.validators.availability import validate_min_remaining_replicas
+from reslib.validators.hpa import ensure_not_at_max_replicas
+from reslib.validators.pdb import ensure_pdb_not_violated
+from reslib.validators.workload import ensure_workload_steady
+
+logger = logging.getLogger(__name__)
 
 
 async def validate_pod_termination_guardrail(**kwargs) -> None:
@@ -36,8 +41,8 @@ async def validate_pod_termination_guardrail(**kwargs) -> None:
         MultipleWorkloadsReturned: If more than one workload matches.
         GuardrailError subclasses: If any policy is violated.
     """
-
-    args = ValidatePodTerminationGuardrailArgs(**kwargs)
+    logger.info("Validating the pod termination guardrail")
+    args = PodTerminationArgsTemplate(**kwargs)
 
     # Discover workloads
     workload: WorkloadState = get_workload(namespace=args.namespace, name=args.workload)
@@ -46,19 +51,21 @@ async def validate_pod_termination_guardrail(**kwargs) -> None:
     pods_to_terminate = selection.with_total(workload.status.ready_replicas)
 
     # validates readiness and reconciling state
-    WorkloadHealthPolicy(workload=workload)
+    ensure_workload_steady(workload=workload)
 
-    # Apply MinAvailabilityPolicy
-    MinAvailabilityPolicy(
+    # Check if workload is at max
+    if workload.spec.hpa:
+        ensure_not_at_max_replicas(workload=workload)
+
+    # Apply MinRemainingReplicasPolicy
+    validate_min_remaining_replicas(
         total=workload.status.ready_replicas,
         terminate=pods_to_terminate,
         min_remaining=args.min_remaining_replicas,
     )
 
     # Apply PodDisruptionBudgetPolicy if requested
-    if args.respect_pdb:
-        if workload.policies and workload.policies.pdb:
-            PodDisruptionBudgetPolicy(
-                remaining_pods=workload.status.ready_replicas - pods_to_terminate,
-                pdb_min_available=workload.policies.pdb.min_available,
-            )
+    if args.respect_pdb and workload.policies and workload.policies.pdb:
+        ensure_pdb_not_violated(workload=workload, disruption_budget=pods_to_terminate)
+
+    logger.info("Pod termination guardrail passed")

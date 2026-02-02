@@ -28,3 +28,23 @@ class PodDeletionTimeoutError(Exception):
 
 class PodsSelectionError(Exception):
     pass
+
+
+class WorkloadAtMaxError(Exception):
+    pass
+
+
+class HpaNotConfiguredError(Exception):
+    pass
+
+
+class MetricsServerUnavailableError(Exception):
+    pass
+
+
+class HpaMetricsNotFoundError(Exception):
+    pass
+
+
+class PodsToStressExceededError(Exception):
+    pass

@@ -4,3 +4,7 @@ class FunctionNotFound(Exception):
 
 class InvalidAsyncHandler(Exception):
     pass
+
+
+class NotSupportedError(Exception):
+    pass
