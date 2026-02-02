@@ -1,6 +1,6 @@
 import math
 from functools import lru_cache
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from kubernetes.client import V1Deployment, V1Pod
 from kubernetes.client.exceptions import ApiException
@@ -287,39 +287,44 @@ def get_deployment_pods(
     return [pod for pod in pods.items if pod.status and pod.status.phase == pod_phase]
 
 
-def calculate_cpu_pods_to_stress_count(
+def calculate_hpa_trigger(
     workload: WorkloadState,
     metric: HPAMetricSpec,
-    idle_cpu_percent: int,
-    stress_cpu_percent: int,
-) -> int:
+    idle_cpu_pct: int,
+    max_cpu_stress_pct_per_pod: Optional[int] = 95,
+) -> Tuple[int, int]:
     """
-    Calculate how many pods need to be stressed to trigger HPA scale-up by one.
+    Calculate the minimal number of pods and CPU percentage per pod to trigger HPA.
 
     Args:
-        workload: The workload state containing current ready replicas.
-        metric: The HPA metric spec (CPU resource metric).
-        idle_cpu_percent: Idle CPU usage then there is no traffic
-        stress_cpu_percent: % of CPU needs to be stressed
+        workload: Current workload state with ready replicas.
+        metric: HPA CPU metric specification.
+        idle_cpu_pct: Current CPU usage when idle (baseline).
+        max_cpu_stress_pct_per_pod: Maximum allowable CPU load per pod (default 95%).
 
     Returns:
-        The number of pods that need to be stressed.
+        Tuple[pods_to_stress, stress_cpu_percent]
 
     Raises:
-        HpaNotConfiguredError: If the metric does not define 'averageUtilization'.
+        HpaNotConfiguredError: If HPA metric lacks 'averageUtilization'.
     """
     target: dict = metric.resource.get("target", {})
     average_utilization = target.get("average_utilization")
 
     if average_utilization is None:
         raise HpaNotConfiguredError(
-            "Missing 'averageUtilization'. HPA is improperly configured."
+            "Missing 'averageUtilization'. HPA is misconfigured."
         )
 
     replicas = workload.status.ready_replicas
-    pods_to_stress = math.ceil(
-        (replicas * average_utilization - replicas * idle_cpu_percent)
-        / (stress_cpu_percent - idle_cpu_percent)
-    )
+    total_required_cpu_increase = replicas * (average_utilization - idle_cpu_pct)
 
-    return pods_to_stress
+    # Start with stressing 1 pod
+    for pods_to_stress in range(1, replicas + 1):
+        stress_percent = idle_cpu_pct + total_required_cpu_increase / pods_to_stress
+        stress_percent = math.ceil(stress_percent)
+        if stress_percent <= max_cpu_stress_pct_per_pod:
+            return pods_to_stress, stress_percent
+
+    # If even all pods at max stress cannot reach target
+    return replicas, max_cpu_stress_pct_per_pod

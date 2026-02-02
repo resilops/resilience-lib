@@ -8,7 +8,7 @@ from reslib.k8s.exceptions import (
     WorkloadAtMaxError,
 )
 from reslib.k8s.schema import HPAConfig, HPAMetricSpec, WorkloadState
-from reslib.k8s.utils import calculate_cpu_pods_to_stress_count, get_hpa_resource_metric
+from reslib.k8s.utils import calculate_hpa_trigger, get_hpa_resource_metric
 
 
 def validate_hpa_resource_metric(
@@ -85,9 +85,8 @@ def validate_pods_to_stress_cpu(
     workload: WorkloadState,
     metric_type: HpaMetricTypeEnum,
     resource: HpaResourceNameEnum,
-    idle_cpu_percent: int,
-    stress_cpu_percent: int,
-    min_idle: int,
+    idle_cpu_pct: int,
+    max_cpu_stress_pct_per_pod: int,
 ) -> int:
     """
     Calculate and validate how many pods need to be stressed to trigger HPA scale-up.
@@ -96,9 +95,8 @@ def validate_pods_to_stress_cpu(
         workload: Workload to stress.
         metric_type: Metric type (e.g., RESOURCE).
         resource: Resource to stress (CPU).
-        idle_cpu_percent: Baseline idle CPU usage per pod.
-        stress_cpu_percent: Target CPU usage per stressed pod.
-        min_idle: Minimum number of pods that must remain idle.
+        idle_cpu_pct: Baseline idle CPU usage per pod.
+        max_cpu_stress_pct_per_pod: Target CPU usage per stressed pod.
 
     Returns:
         Number of pods to stress.
@@ -110,14 +108,14 @@ def validate_pods_to_stress_cpu(
         hpa=workload.spec.hpa, metric_type=metric_type, resource=resource
     )
 
-    pods_to_stress = calculate_cpu_pods_to_stress_count(
+    pods_to_stress, _ = calculate_hpa_trigger(
         workload=workload,
         metric=hpa_metric,
-        idle_cpu_percent=idle_cpu_percent,
-        stress_cpu_percent=stress_cpu_percent,
+        idle_cpu_pct=idle_cpu_pct,
+        max_cpu_stress_pct_per_pod=max_cpu_stress_pct_per_pod,
     )
 
-    max_pods_can_stress = max(workload.status.ready_replicas - min_idle, 0)
+    max_pods_can_stress = max(workload.status.ready_replicas, 0)
     if pods_to_stress > max_pods_can_stress:
         raise PodsToStressExceededError(
             f"Calculated pods to stress ({pods_to_stress}) exceeds limit "

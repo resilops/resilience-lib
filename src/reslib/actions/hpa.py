@@ -17,7 +17,7 @@ from reslib.k8s.client import KubernetesClient
 from reslib.k8s.exceptions import CPUStressCommandFailed
 from reslib.k8s.schema import HPAMetricSpec, WorkloadState
 from reslib.k8s.utils import (
-    calculate_cpu_pods_to_stress_count,
+    calculate_hpa_trigger,
     get_deployment_pods,
     get_hpa_resource_metric,
     get_workload,
@@ -28,51 +28,6 @@ logger = logging.getLogger(__name__)
 
 STDOUT_CHANNEL = 1
 STDERR_CHANNEL = 2
-
-
-def _run_stress_command(
-    k8s: KubernetesClient,
-    pod: V1Pod,
-    command: list[str],
-    container: Optional[str],
-    timeout: int,
-) -> tuple[str, str]:
-    """
-    Blocking function to run a stress command via Kubernetes exec.
-
-    Returns stdout and stderr from the pod.
-    Raises CPUStressCommandFailed if exec fails.
-    """
-    try:
-        resp = stream.stream(
-            k8s.v1_api.connect_get_namespaced_pod_exec,
-            name=pod.metadata.name,
-            namespace=pod.metadata.namespace,
-            container=container,
-            command=command,
-            stderr=True,
-            stdin=False,
-            stdout=True,
-            tty=False,
-            _preload_content=False,
-        )
-
-        resp.run_forever(timeout=timeout)
-        stdout = resp.read_channel(STDOUT_CHANNEL)
-        stderr = resp.read_channel(STDERR_CHANNEL).strip()
-
-        if stderr:
-            raise CPUStressCommandFailed(
-                f"Pod {pod.metadata.name} container={container} "
-                f"failed. Reason: {stderr}"
-            )
-
-        return stdout, stderr
-    except Exception as e:
-        raise CPUStressCommandFailed(
-            f"Pod {pod.metadata.name} container={container} failed to start stress-ng. "
-            f"Reason: {str(e)}"
-        ) from e
 
 
 async def _apply_cpu_stress(
@@ -111,17 +66,43 @@ async def _apply_cpu_stress(
     ]
 
     logger.info(
-        f"Running stress command for pod: {pod.metadata.name} container={container}"
+        f"Running stress command for "
+        f"pod: {pod.metadata.name} container={container} stress_cpu_pct={cpu_percent}"
     )
-    await asyncio.to_thread(
-        _run_stress_command,
-        k8s,
-        pod,
-        command,
-        container,
-        duration_seconds + POD_STRESS_DURATION_BUFFER,
-    )
-    logger.info(f"Stress finished for pod: {pod.metadata.name} container={container}")
+    try:
+        resp = stream.stream(
+            k8s.v1_api.connect_get_namespaced_pod_exec,
+            name=pod.metadata.name,
+            namespace=pod.metadata.namespace,
+            container=container,
+            command=command,
+            stderr=True,
+            stdin=False,
+            stdout=True,
+            tty=False,
+            _preload_content=False,
+        )
+
+        await asyncio.to_thread(
+            resp.run_forever, timeout=duration_seconds + POD_STRESS_DURATION_BUFFER
+        )
+        stdout = resp.read_channel(STDOUT_CHANNEL)
+        stderr = resp.read_channel(STDERR_CHANNEL).strip()
+
+        if stderr:
+            raise CPUStressCommandFailed(
+                f"Pod {pod.metadata.name} container={container} "
+                f"failed. Reason: {stderr}"
+            )
+        logger.info(
+            f"Stress finished for pod: {pod.metadata.name} container={container}"
+        )
+        return stdout, stderr
+    except Exception as e:
+        raise CPUStressCommandFailed(
+            f"Pod {pod.metadata.name} container={container} failed to start stress-ng. "
+            f"Reason: {str(e)}"
+        ) from e
 
 
 async def stress_cpu_hpa(**kwargs):
@@ -140,7 +121,7 @@ async def stress_cpu_hpa(**kwargs):
         namespace: Kubernetes namespace of the workload.
         workload: Name of the workload (deployment).
         stress_cpu_percent: Target CPU percentage per stressed pod.
-        idle_cpu_percent: Baseline CPU usage percentage for pods.
+        idle_cpu_pct: Baseline CPU usage percentage for pods.
         stress_duration: Duration of the stress in seconds.
         container_name: Optional container name in which to execute stress.
 
@@ -166,11 +147,14 @@ async def stress_cpu_hpa(**kwargs):
     )
 
     # 2. Calculate how many pods must be stressed to trigger scale-up
-    pods_to_stress_count = calculate_cpu_pods_to_stress_count(
+    pods_to_stress_count, stress_cpu_percent = calculate_hpa_trigger(
         workload=workload,
         metric=hpa_metric,
-        idle_cpu_percent=args.idle_cpu_percent,
-        stress_cpu_percent=args.stress_cpu_percent,
+        idle_cpu_pct=args.idle_cpu_pct,
+        max_cpu_stress_pct_per_pod=args.max_cpu_stress_pct_per_pod,
+    )
+    logger.info(
+        f"Pods to stress: {pods_to_stress_count} with CPU percent: {stress_cpu_percent}"
     )
 
     if pods_to_stress_count <= 0:
@@ -185,7 +169,7 @@ async def stress_cpu_hpa(**kwargs):
         _apply_cpu_stress(
             k8s=k8s,
             pod=pod,
-            cpu_percent=args.stress_cpu_percent,
+            cpu_percent=stress_cpu_percent,
             duration_seconds=args.stress_duration,
             container=args.container,  # optional: app or sidecar container
         )

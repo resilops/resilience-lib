@@ -39,6 +39,7 @@ async def _execute_phase(
     *,
     scenario: ResiliencyScenario,
     phase: ExecutionPhase,
+    start_event: EventEnum,
     success_event: EventEnum,
     failure_event: EventEnum,
     telemetry: h.BaseTelemetry,
@@ -56,29 +57,34 @@ async def _execute_phase(
     Args:
         scenario: Resiliency scenario containing template and steps.
         phase: The phase to execute (guardrail, action, rollback).
+        start_event: Event recorded on execution phase start.
         success_event: Event recorded on successful execution.
         failure_event: Event recorded on failure.
         telemetry: Telemetry recorder for emitting lifecycle events.
     """
-    for step in scenario.steps:
-        if not step.name or step.type != phase:
-            continue
-
-        error: Optional[Exception] = None
-        try:
+    telemetry.emit_event(
+        event=EventPayload(
+            event_name=start_event,
+            phase=phase,
+            details=f"Phase: {phase.value} execution started",
+        )
+    )
+    error: Optional[Exception] = None
+    try:
+        for step in filter(lambda s: s.name and s.type == phase, scenario.steps):
             func: AsyncFunc = resolve(phase=step.type, name=step.name)
             await func(**scenario.template, **step.overrides, telemetry=telemetry)
-        except Exception as exc:
-            error = exc
-            logger.exception("Error executing the phase", extra={"phase": phase})
-            raise exc
-        finally:
-            event = EventPayload(
-                event_name=failure_event if error else success_event,
-                phase=step.type,
-                details=str(error) if error else None,
-            )
-            telemetry.emit_event(event=event)
+    except Exception as exc:
+        error = exc
+        logger.exception("Error executing the phase", extra={"phase": phase})
+        raise exc
+    finally:
+        event = EventPayload(
+            event_name=failure_event if error else success_event,
+            phase=phase,
+            details=str(error) if error else None,
+        )
+        telemetry.emit_event(event=event)
 
 
 async def execute_resilience_scenario(
@@ -111,6 +117,7 @@ async def execute_resilience_scenario(
     await _execute_phase(
         scenario=scenario,
         phase=ExecutionPhase.GUARDRAIL,
+        start_event=EventEnum.GUARDRAIL_STARTED,
         success_event=EventEnum.GUARDRAIL_SUCCESS,
         failure_event=EventEnum.GUARDRAIL_FAILED,
         telemetry=telemetry,
@@ -121,6 +128,7 @@ async def execute_resilience_scenario(
         await _execute_phase(
             scenario=scenario,
             phase=ExecutionPhase.ACTION,
+            start_event=EventEnum.ACTION_STARTED,
             success_event=EventEnum.ACTION_SUCCESS,
             failure_event=EventEnum.ACTION_FAILED,
             telemetry=telemetry,
@@ -128,6 +136,7 @@ async def execute_resilience_scenario(
         await _execute_phase(
             scenario=scenario,
             phase=ExecutionPhase.ROLLBACK,
+            start_event=EventEnum.ROLLBACK_STARTED,
             success_event=EventEnum.ROLLBACK_SUCCESS,
             failure_event=EventEnum.ROLLBACK_FAILED,
             telemetry=telemetry,

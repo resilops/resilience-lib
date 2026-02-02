@@ -39,21 +39,14 @@ class HpaCPUStressArgsTemplate(BaseModel):
         ...,
         description="Specific resource name for the metric (e.g., 'cpu', 'memory').",
     )
-    min_idle: int = Field(
-        default=1,
-        ge=0,
-        description=(
-            "Minimum number of pods that must remain idle (not stressed) for safety."
-        ),
-    )
-    idle_cpu_percent: int = Field(
+    idle_cpu_pct: int = Field(
         default=10,
         ge=0,
         le=100,
         description="Estimated CPU percentage used by a pod when idle (baseline).",
     )
-    stress_cpu_percent: int = Field(
-        default=90,
+    max_cpu_stress_pct_per_pod: int = Field(
+        default=95,
         gt=0,
         le=95,  # Cap stress to avoid pod down
         description="Target CPU percentage to stress each pod to during the test.",
@@ -61,7 +54,7 @@ class HpaCPUStressArgsTemplate(BaseModel):
     stress_duration: int = Field(
         120,
         ge=30,
-        le=600,  # Some upper limit
+        le=600,  # Some upper limit.
         description=(
             "A new ready replica must be observed within this duration after CPU "
             "stress begins. Default is 120s."
