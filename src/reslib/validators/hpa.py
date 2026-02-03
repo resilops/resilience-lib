@@ -1,3 +1,4 @@
+import math
 from typing import Optional
 
 from reslib.constants import HpaMetricTypeEnum, HpaResourceNameEnum
@@ -87,6 +88,7 @@ def validate_pods_to_stress_cpu(
     resource: HpaResourceNameEnum,
     idle_cpu_pct: int,
     max_cpu_stress_pct_per_pod: int,
+    min_pods_idle_pct: int,
 ) -> int:
     """
     Calculate and validate how many pods need to be stressed to trigger HPA scale-up.
@@ -96,7 +98,9 @@ def validate_pods_to_stress_cpu(
         metric_type: Metric type (e.g., RESOURCE).
         resource: Resource to stress (CPU).
         idle_cpu_pct: Baseline idle CPU usage per pod.
-        max_cpu_stress_pct_per_pod: Target CPU usage per stressed pod.
+        max_cpu_stress_pct_per_pod: Maximum CPU usage per stressed pod.
+        min_pods_idle_pct: Minimum percentage of pods that must remain
+                           idle (not stressed).
 
     Returns:
         Number of pods to stress.
@@ -115,11 +119,16 @@ def validate_pods_to_stress_cpu(
         max_cpu_stress_pct_per_pod=max_cpu_stress_pct_per_pod,
     )
 
-    max_pods_can_stress = max(workload.status.ready_replicas, 0)
+    min_idle_pods_count = math.ceil(
+        workload.status.ready_replicas * min_pods_idle_pct / 100
+    )
+    max_pods_can_stress = workload.status.ready_replicas - min_idle_pods_count
+
     if pods_to_stress > max_pods_can_stress:
         raise PodsToStressExceededError(
             f"Calculated pods to stress ({pods_to_stress}) exceeds limit "
-            f"(ready_replicas={workload.status.ready_replicas}, min_idle={min_idle})"
+            f"(ready_replicas={workload.status.ready_replicas}, "
+            f"min_idle_pods_count={min_idle_pods_count})"
         )
 
     return pods_to_stress

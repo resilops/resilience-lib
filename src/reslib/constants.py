@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Awaitable, Callable
+from typing import Awaitable, Callable, Tuple
 
 POD_RUNNING_STATUS = "Running"
 DEPLOYMENT_CONDITION_AVAILABLE = "Available"
@@ -9,8 +9,11 @@ DEPLOYMENT_STATUS_RS_AVAILABLE = "NewReplicaSetAvailable"
 DEPLOYMENT_STATUS_MIN_RS_AVAILABLE = "MinimumReplicasAvailable"
 DEPLOYMENT_STATUS_PROGRESS_DEADLINE = "ProgressDeadlineExceeded"
 
-POD_STRESS_DURATION_BUFFER: int = 10  # Stress 10 seconds more
-POD_STRESS_TASK_TIMEOUT_BUFFER: int = 30  # Timeout in stress duration + 30 seconds
+HPA_SCALEUP_TASK_BUFFER_TIME: int = 10
+
+POD_WAITING_REASONS_OK: Tuple = ("PodInitializing", "ContainerCreating")
+
+POD_TERMINATED_REASONS_OK: Tuple = ("Completed", None)
 
 
 class HpaMetricTypeEnum(str, Enum):
@@ -68,6 +71,10 @@ class EventEnum(str, Enum):
     ROLLBACK_STARTED: str = "res:reslib:event:rollback:started"
     ROLLBACK_SUCCESS: str = "res:reslib:event:rollback:success"
     ROLLBACK_FAILED: str = "res:reslib:event:rollback:failed"
+
+    # Scale up event
+    HPA_SCALEUP_SUCCESS: str = "res:reslib:event:scale:up:success"
+    HPA_SCALEUP_FAILED: str = "res:reslib:event:scale:up:failed"
 
 
 class MetricsEnum(str, Enum):

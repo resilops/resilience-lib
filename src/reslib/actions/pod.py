@@ -4,7 +4,7 @@ from typing import List
 
 from kubernetes.client import V1DeleteOptions, V1Pod
 
-from reslib.core.watchdog import monitor_tasks
+from reslib.core.watchdog import watch_task_group, watch_until
 from reslib.k8s.client import KubernetesClient
 from reslib.k8s.exceptions import PodDeletionTimeoutError, PodsSelectionError
 from reslib.k8s.schema import WorkloadState
@@ -20,31 +20,46 @@ from reslib.schemas.validators import QuantitySelection
 logger = logging.getLogger(__name__)
 
 
-async def _delete_pod_and_wait_task(
-    namespace: str, pod: V1Pod, k8s: KubernetesClient, interval: float = 4.0
-) -> None:
+def watch_pod_deletion(k8s: KubernetesClient, pod: V1Pod, namespace: str, timeout: int):
     """
-    Delete a single pod and wait until it is fully removed.
+    Delete a pod and return a watchable task to monitor its deletion.
+
+    This function immediately issues a deletion request for the given pod
+    and returns a tuple containing a coroutine that completes when the pod
+    is fully removed, along with a descriptive task name. It is intended
+    for use with `watch_task_group` or similar task orchestration utilities.
 
     Args:
-        namespace: Kubernetes namespace.
-        pod: Pod object to delete.
-        k8s: Kubernetes client instance.
-        interval: Seconds between polling for pod existence.
+        k8s (KubernetesClient): Kubernetes client instance.
+        pod (V1Pod): Pod object to delete.
+        namespace (str): Namespace where the pod resides.
+        timeout (int): Maximum time in seconds to wait for the pod deletion.
+
+    Returns:
+        Tuple[Awaitable, str]: A coroutine that resolves when the pod no
+        longer exists, and a string task name in the format `delete:pod:<pod_name>`.
 
     Raises:
-        PodDeletionTimeoutError: If pod is not deleted within timeout.
+        PodDeletionTimeoutError: If the pod is not deleted within the specified timeout.
     """
-    logger.info("Requesting deletion of pod %s/%s", namespace, pod.metadata.name)
     k8s.v1_api.delete_namespaced_pod(
         name=pod.metadata.name, namespace=namespace, body=V1DeleteOptions()
     )
-
-    while True:
-        if not pod_exists(namespace=namespace, pod_name=pod.metadata.name, k8s=k8s):
-            logger.info("Pod %s/%s successfully deleted", namespace, pod.metadata.name)
-            return
-        await asyncio.sleep(interval)
+    return (
+        watch_until(
+            condition=pod_exists,
+            timeout=timeout,
+            poll_interval=5,
+            namespace=namespace,
+            pod_name=pod.metadata.name,
+            k8s=k8s,
+            timeout_exception=PodDeletionTimeoutError(
+                "Timed out waiting for pods to be deleted in "
+                f"namespace '{namespace}'"
+            ),
+        ),
+        f"delete:pod:{pod.metadata.name}",
+    )
 
 
 async def terminate_pods(**kwargs) -> None:
@@ -103,18 +118,12 @@ async def terminate_pods(**kwargs) -> None:
         )
 
     # 4. Terminate pods concurrently
-    try:
-        await monitor_tasks(
-            watch_tasks=[
-                _delete_pod_and_wait_task(namespace=args.namespace, pod=pod, k8s=k8s)
-                for pod in candidate_pods
-            ],
-            timeout=get_pod_termination_timeout(candidate_pods),
-            return_when=asyncio.FIRST_EXCEPTION,
-        )
-    except TimeoutError:
-        raise PodDeletionTimeoutError(
-            f"Timed out waiting for pods to be deleted in namespace '{args.namespace}'"
-        )
-
+    timeout: int = get_pod_termination_timeout(candidate_pods)
+    tasks = [
+        watch_pod_deletion(k8s=k8s, pod=pod, namespace=args.namespace, timeout=timeout)
+        for pod in candidate_pods
+    ]
+    await watch_task_group(
+        tasks=tasks, timeout=timeout + 5, return_when=asyncio.FIRST_EXCEPTION
+    )
     logger.info("Pod termination successful")

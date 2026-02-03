@@ -2,6 +2,7 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from reslib import helpers as h
 from reslib.constants import (
     SUPPORTED_HPA_METRIC_TYPES,
     SUPPORTED_HPA_RESOURCE_NAMES,
@@ -24,7 +25,7 @@ class HpaCPUStressArgsTemplate(BaseModel):
 
     namespace: str = Field(..., description="Kubernetes namespace of the workload.")
     workload: str = Field(..., description="Name of the workload")
-    container: Optional[str] = Field(
+    container_name: Optional[str] = Field(
         default=None,
         description=(
             "Name of the container to run the stress test, if not given first "
@@ -51,7 +52,10 @@ class HpaCPUStressArgsTemplate(BaseModel):
         le=95,  # Cap stress to avoid pod down
         description="Target CPU percentage to stress each pod to during the test.",
     )
-    stress_duration: int = Field(
+    min_pods_idle_pct: int = Field(
+        default=20, le=100, description="Exclude % pods from stress tests"
+    )
+    max_stress_duration: int = Field(
         120,
         ge=30,
         le=600,  # Some upper limit.
@@ -59,6 +63,11 @@ class HpaCPUStressArgsTemplate(BaseModel):
             "A new ready replica must be observed within this duration after CPU "
             "stress begins. Default is 120s."
         ),
+    )
+
+    telemetry: h.BaseTelemetry = Field(
+        default_factory=h.NoopTelemetry,
+        description="Telemetry recorder to log metrics.",
     )
 
     @model_validator(mode="after")

@@ -1,6 +1,6 @@
 import asyncio
 
-from reslib.rollbacks.schema import WaitForWorkloadStabilityArgs
+from reslib.schemas.pod import WorkloadStabilityArgs
 
 
 async def wait_for_workload_stability(**kwargs) -> None:
@@ -20,5 +20,5 @@ async def wait_for_workload_stability(**kwargs) -> None:
     Example:
         await wait_for_workload_stability(namespace="abc", labels="app=myapp")
     """
-    args = WaitForWorkloadStabilityArgs(**kwargs)
-    await asyncio.sleep(args.wait_period)
+    args = WorkloadStabilityArgs(**kwargs)
+    await asyncio.sleep(args.wait_for_stability)

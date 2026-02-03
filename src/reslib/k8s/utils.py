@@ -1,19 +1,32 @@
 import math
 from functools import lru_cache
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
+from kubernetes import config as k8config
 from kubernetes.client import V1Deployment, V1Pod
 from kubernetes.client.exceptions import ApiException
 
 from reslib.config import config
 from reslib.constants import (
+    DEPLOYMENT_CONDITION_AVAILABLE,
+    DEPLOYMENT_CONDITION_PROGRESSING,
+    DEPLOYMENT_STATUS_MIN_RS_AVAILABLE,
+    DEPLOYMENT_STATUS_PROGRESS_DEADLINE,
+    DEPLOYMENT_STATUS_RS_AVAILABLE,
     POD_RUNNING_STATUS,
+    POD_TERMINATED_REASONS_OK,
+    POD_WAITING_REASONS_OK,
     HpaMetricTypeEnum,
     HpaResourceNameEnum,
     K8DeploymentKind,
 )
 from reslib.k8s.client import KubernetesClient
-from reslib.k8s.exceptions import HpaNotConfiguredError, WorkloadNotFound
+from reslib.k8s.exceptions import (
+    ContainerCrashedError,
+    HpaNotConfiguredError,
+    HpaScaledError,
+    WorkloadNotFound,
+)
 from reslib.k8s.schema import (
     HPAConfig,
     HPAMetricSpec,
@@ -24,12 +37,91 @@ from reslib.k8s.schema import (
     WorkloadStatus,
 )
 from reslib.k8s.snapshot import NamespaceSnapshot
-from reslib.k8s.status import (
-    is_deployment_available,
-    is_deployment_faulty,
-    is_deployment_in_progress,
-    ready_replicas,
-)
+
+
+def current_cluster_name() -> str:
+    """
+    Get current active cluster name from the config
+
+    Returns:
+        Name of the cluster (string)
+    """
+    _, active_context = k8config.list_kube_config_contexts()
+    return active_context.get("context", {}).get("cluster")
+
+
+def is_deployment_in_progress(deployment: V1Deployment) -> bool:
+    """
+    Determine if a Deployment is currently rolling out.
+
+    A deployment is considered "in progress" if:
+      - Progressing=True
+      - AND the reason is not "NewReplicaSetAvailable"
+
+    Args:
+        deployment: V1Deployment object.
+
+    Returns:
+        True if rollout is in progress, False otherwise.
+    """
+    conditions: List = deployment.status.conditions or []
+
+    for cond in conditions:
+        if (
+            cond.type == DEPLOYMENT_CONDITION_PROGRESSING
+            and cond.status == "True"
+            and cond.reason != DEPLOYMENT_STATUS_RS_AVAILABLE
+        ):
+            return True
+
+    return False
+
+
+def is_deployment_available(deployment: V1Deployment) -> bool:
+    """
+    Determine if a Deployment is currently available.
+
+    Args:
+        deployment: V1Deployment object.
+
+    Returns:
+        True if serving traffic, False otherwise.
+    """
+    conditions: List = deployment.status.conditions or []
+    for cond in conditions:
+        if (
+            cond.type == DEPLOYMENT_CONDITION_AVAILABLE
+            and cond.status == "True"
+            and cond.reason == DEPLOYMENT_STATUS_MIN_RS_AVAILABLE
+        ):
+            return True
+    return False
+
+
+def is_deployment_faulty(deployment: V1Deployment) -> bool:
+    """
+    Determine whether a Deployment is in a failed state.
+
+    A Deployment is considered faulty if Kubernetes reports that
+    the rollout has failed due to exceeding the progress deadline.
+
+    Args:
+        deployment: V1Deployment object.
+
+    Returns:
+        True if the Deployment is faulty, False otherwise.
+    """
+    conditions: List = deployment.status.conditions or []
+
+    for cond in conditions:
+        if (
+            cond.type == DEPLOYMENT_CONDITION_PROGRESSING
+            and cond.status == "False"
+            and cond.reason == DEPLOYMENT_STATUS_PROGRESS_DEADLINE
+        ):
+            return True
+
+    return False
 
 
 @lru_cache(maxsize=64)
@@ -119,7 +211,7 @@ def build_workload_policies(
 def build_workload_status(deployment: V1Deployment) -> WorkloadStatus:
     """Build the current WorkloadStatus from a Deployment."""
     return WorkloadStatus(
-        ready_replicas=ready_replicas(deployment),
+        ready_replicas=deployment.status.ready_replicas or 0,
         is_available=is_deployment_available(deployment),
         reconciling=is_deployment_in_progress(deployment),
         is_faulty=is_deployment_faulty(deployment),
@@ -174,6 +266,7 @@ def get_workload(
 
 
 def pod_exists(
+    *,
     namespace: str,
     pod_name: str,
     k8s: Optional[KubernetesClient] = None,
@@ -190,7 +283,6 @@ def pod_exists(
         True if the Pod exists, False otherwise.
     """
     k8s = k8s or KubernetesClient()
-
     try:
         k8s.v1_api.read_namespaced_pod(name=pod_name, namespace=namespace)
         return True
@@ -261,7 +353,7 @@ def get_deployment_pods(
     k8s: KubernetesClient,
     namespace: str,
     deployment: V1Deployment,
-    pod_phase: str = POD_RUNNING_STATUS,
+    pod_phase: Optional[str] = POD_RUNNING_STATUS,
 ) -> List[V1Pod]:
     """
     Return pods belonging to a workload filtered by pod phase.
@@ -284,7 +376,10 @@ def get_deployment_pods(
         label_selector=selector,
     )
 
-    return [pod for pod in pods.items if pod.status and pod.status.phase == pod_phase]
+    if pod_phase is None:
+        return [pod for pod in pods.items]
+
+    return [pod for pod in pods.items if pod.status.phase == pod_phase]
 
 
 def calculate_hpa_trigger(
@@ -328,3 +423,81 @@ def calculate_hpa_trigger(
 
     # If even all pods at max stress cannot reach target
     return replicas, max_cpu_stress_pct_per_pod
+
+
+def raise_on_container_fail(
+    k8s: KubernetesClient, deployment: V1Deployment, namespace: str
+) -> None:
+    """
+    Check all pods in a deployment for container failures.
+
+    Args:
+        k8s: Kubernetes client instance used to query pods.
+        deployment: The Kubernetes deployment object to inspect.
+        namespace: Namespace where the deployment resides.
+
+    Raises:
+        ContainerCrashedError: If any container is in a crash, waiting with
+        abnormal reason, or terminated with an unexpected reason or non-zero exit code.
+    """
+    pods: List[V1Pod] = get_deployment_pods(
+        k8s=k8s, deployment=deployment, namespace=namespace, pod_phase=None
+    )
+
+    for pod in pods:
+        pod_name = pod.metadata.name
+        container_statuses = pod.status.container_statuses or []
+        for cs in container_statuses:
+            container_name = cs.name
+            state = cs.state
+            # Check for waiting state with abnormal reasons
+            if state.waiting and state.waiting.reason not in POD_WAITING_REASONS_OK:
+                raise ContainerCrashedError(
+                    f"Pod '{pod_name}' container "
+                    f"'{container_name}' is waiting "
+                    f"unexpectedly: {state.waiting.reason}"
+                )
+
+            # Check for terminated state with abnormal reasons
+            if (
+                state.terminated
+                and state.terminated.reason not in POD_TERMINATED_REASONS_OK
+            ):
+                raise ContainerCrashedError(
+                    f"Pod '{pod_name}' container '{container_name}' "
+                    f"terminated unexpectedly (reason={state.terminated.reason}, "
+                    f"exit_code={state.terminated.exit_code})"
+                )
+
+
+def raise_on_hpa_scale(
+    k8s: KubernetesClient, workload_name: str, namespace: str, start_replicas: int
+) -> Optional[Dict[str, int]]:
+    """
+    Check if a deployment's ready replicas have increased above the starting count.
+
+    Args:
+        k8s: Kubernetes client instance.
+        workload_name: Name of the deployment/workload.
+        namespace: Kubernetes namespace of the deployment.
+        start_replicas: The initial number of ready replicas.
+
+    Returns:
+        Dict with 'before' and 'after' keys if replicas increased, otherwise None.
+
+    Raises:
+        HpaScaledError: If the number of ready replicas exceeds start_replicas.
+    """
+    deployment = k8s.apps.read_namespaced_deployment(
+        name=workload_name, namespace=namespace
+    )
+    current_replicas = deployment.status.ready_replicas or 0
+
+    if current_replicas > start_replicas:
+        raise HpaScaledError(
+            "HPA scaled: replicas increased",
+            before=start_replicas,
+            after=current_replicas,
+        )
+
+    return None

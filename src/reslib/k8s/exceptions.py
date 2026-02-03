@@ -52,3 +52,22 @@ class PodsToStressExceededError(Exception):
 
 class CPUStressCommandFailed(Exception):
     pass
+
+
+class ContainerCrashedError(Exception):
+    pass
+
+
+class HpaScaledError(Exception):
+    """
+    Raised when HPA triggers scaling and replicas increase above the start count.
+
+    Attributes:
+        before: Number of replicas before scaling.
+        after: Number of replicas after scaling.
+    """
+
+    def __init__(self, message: str, *, before: int, after: int):
+        super().__init__(message)
+        self.before = before
+        self.after = after

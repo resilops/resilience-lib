@@ -29,12 +29,19 @@ class PodTerminationArgsTemplate(BaseModel):
     respect_pdb: bool = Field(
         default=True, description="Whether to enforce PodDisruptionBudget rules."
     )
-    wait_for_stability: int = Field(
-        default=60,
-        ge=1,
-        description="Wait after pod termination to stabilize workload",
-    )
     telemetry: h.BaseTelemetry = Field(
         default_factory=h.NoopTelemetry,
         description="Telemetry recorder to log metrics.",
+    )
+
+
+class WorkloadStabilityArgs(BaseModel):
+    """Workload stability rollback args"""
+
+    model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
+
+    wait_for_stability: int = Field(
+        default=60,
+        ge=1,
+        description="Wait for x seconds to stabilize workload",
     )

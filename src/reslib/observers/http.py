@@ -1,12 +1,11 @@
 import asyncio
-import time
-from typing import Optional, Tuple
+from typing import Optional
 
 import httpx
 
 from reslib import helpers as h
 from reslib.constants import MetricsEnum
-from reslib.core.watchdog import monitor_tasks
+from reslib.core.watchdog import watch_task_group
 from reslib.k8s.schema import WorkloadState
 from reslib.k8s.utils import get_workload
 from reslib.schemas.http import HTTPLatencyArgsTemplate
@@ -17,20 +16,20 @@ def _emit_metrics(
     *,
     workload: WorkloadState,
     telemetry: h.BaseTelemetry,
-    response: Optional[httpx.Response] = None,
-    latency: Optional[float] = None,
+    timed_response: Optional[h.TimedResponse] = None,
     error: Optional[Exception] = None,
-):
+) -> None:
     """Emit a single observer metric with optional error or latency info."""
     metrics = MetricsPayload(
         metrics_name=MetricsEnum.HTTP,
-        function="measure_http_latency",
+        function="measure_endpoint_latency",
         workload_state=workload.model_dump(),
     )
 
-    if response:
-        metrics.status_code = response.status_code
-        metrics.latency = latency
+    if timed_response:
+        metrics.status_code = timed_response.response.status_code
+        metrics.latency = timed_response.latency
+        metrics.request_timestamp = timed_response.timestamp
 
     if error:
         metrics.is_error = True
@@ -39,21 +38,7 @@ def _emit_metrics(
     telemetry.emit_metrics(metrics=metrics)
 
 
-async def _send_timed_request(
-    client: httpx.AsyncClient, endpoint: str
-) -> Tuple[httpx.Response, float]:
-    """
-    Send an HTTP GET request and measure latency.
-
-    Raises exceptions directly — they will be handled after requests complete.
-    """
-    start = time.perf_counter()
-    response = await client.get(endpoint)
-    latency = time.perf_counter() - start
-    return response, latency
-
-
-async def measure_http_latency(**kwargs) -> None:
+async def measure_endpoint_latency(**kwargs) -> None:
     """
     Measure HTTP latency for a workload endpoint and emit observer metrics.
 
@@ -70,14 +55,17 @@ async def measure_http_latency(**kwargs) -> None:
 
     async with httpx.AsyncClient(timeout=args.timeout) as client:
         # 1. Build request coroutines
-        watch_tasks = [
-            _send_timed_request(client=client, endpoint=args.endpoint)
-            for _ in range(args.requests_per_interval)
+        tasks = [
+            (
+                h.send_timed_request(client=client, endpoint=args.endpoint),
+                f"request:{n}",
+            )
+            for n in range(args.requests_per_interval)
         ]
 
         # 2. Execute all tasks concurrently, do not propagate exceptions except timeout
-        completed_tasks = await monitor_tasks(
-            watch_tasks=watch_tasks,
+        completed_tasks = await watch_task_group(
+            tasks=tasks,
             timeout=args.timeout * args.requests_per_interval,
             return_when=asyncio.FIRST_EXCEPTION,
             raise_exception=False,
@@ -89,11 +77,10 @@ async def measure_http_latency(**kwargs) -> None:
     # 4. Emit events for each completed request
     for task in completed_tasks:
         try:
-            response, latency = task.result()
+            response: h.TimedResponse = task.result()
             _emit_metrics(
                 workload=workload,
-                response=response,
-                latency=latency,
+                timed_response=response,
                 telemetry=args.telemetry,
             )
         except Exception as exc:
