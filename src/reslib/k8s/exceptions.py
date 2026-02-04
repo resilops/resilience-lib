@@ -1,73 +1,69 @@
-class WorkloadNotFound(Exception):
+from reslib.exceptions import ExceptionWithContext
+
+
+class WorkloadNotFound(ExceptionWithContext):
     pass
 
 
-class WorkloadStatusUnavailableError(Exception):
+class WorkloadStatusUnavailableError(ExceptionWithContext):
     pass
 
 
-class WorkloadReconcilingError(Exception):
+class WorkloadReconcilingError(ExceptionWithContext):
     pass
 
 
-class WorkloadFaultyError(Exception):
+class WorkloadFaultyError(ExceptionWithContext):
     pass
 
 
-class WorkloadNotAvailableError(Exception):
+class WorkloadNotAvailableError(ExceptionWithContext):
     pass
 
 
-class DisruptionExceedMinAvailabilityError(Exception):
+class DisruptionExceedMinAvailabilityError(ExceptionWithContext):
     pass
 
 
-class PodDeletionTimeoutError(Exception):
+class PodDeletionTimeoutError(ExceptionWithContext):
     pass
 
 
-class PodsSelectionError(Exception):
+class PodsSelectionError(ExceptionWithContext):
     pass
 
 
-class WorkloadAtMaxError(Exception):
+class WorkloadAtMaxError(ExceptionWithContext):
     pass
 
 
-class HpaNotConfiguredError(Exception):
+class HpaNotConfiguredError(ExceptionWithContext):
     pass
 
 
-class MetricsServerUnavailableError(Exception):
+class MetricsServerUnavailableError(ExceptionWithContext):
     pass
 
 
-class HpaMetricsNotFoundError(Exception):
+class HpaMetricsNotFoundError(ExceptionWithContext):
     pass
 
 
-class PodsToStressExceededError(Exception):
+class PodsToStressExceededError(ExceptionWithContext):
     pass
 
 
-class CPUStressCommandFailed(Exception):
+class CPUStressCommandFailed(ExceptionWithContext):
     pass
 
 
-class ContainerCrashedError(Exception):
+class ContainerCrashedError(ExceptionWithContext):
     pass
 
 
-class HpaScaledError(Exception):
-    """
-    Raised when HPA triggers scaling and replicas increase above the start count.
+class InsufficientMemoryError(ExceptionWithContext):
+    pass
 
-    Attributes:
-        before: Number of replicas before scaling.
-        after: Number of replicas after scaling.
-    """
 
-    def __init__(self, message: str, *, before: int, after: int):
-        super().__init__(message)
-        self.before = before
-        self.after = after
+class HpaScaledError(ExceptionWithContext):
+    pass

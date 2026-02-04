@@ -113,13 +113,17 @@ async def execute_cpu_stress(
         return stdout, stderr
     except TimeoutError as exc:
         raise CPUStressCommandFailed(
-            f"CPU stress timed out after {timeout}s in "
-            f"pod {pod.metadata.name} container={container_name}"
+            "CPU stress command timeout",
+            context={
+                "pod": pod.metadata.name,
+                "timeout": timeout,
+                "container": container_name,
+            },
         ) from exc
     except Exception as exc:
         raise CPUStressCommandFailed(
-            f"Failed to execute stress-ng in pod {pod.metadata.name} "
-            f"container={container_name}: {exc}"
+            "Something went wrong with the command stress-ng",
+            context={"container": container_name, "exc": str(exc)},
         ) from exc
     finally:
         if stream_resp is not None:
@@ -277,8 +281,7 @@ async def stress_cpu_hpa(**kwargs) -> None:
                 event_name=EventEnum.HPA_SCALEUP_SUCCESS,
                 function="stress_cpu_hpa",
                 phase=ExecutionPhase.ACTION,
-                before=exc.before,
-                after=exc.after,
+                context=exc.context,
             )
         )
     except Exception as exc:

@@ -80,14 +80,14 @@ class HpaCPUStressArgsTemplate(BaseModel):
         """
         if self.metric_type not in SUPPORTED_HPA_METRIC_TYPES:
             raise NotSupportedError(
-                f"HPA scaling tests for metric type "
-                f"'{self.metric_type}' are not supported yet."
+                "HPA scaling tests not supported for a given metrics yet.",
+                context={"metric_type": self.metric_type},
             )
 
         if self.resource not in SUPPORTED_HPA_RESOURCE_NAMES:
             raise NotSupportedError(
-                f"HPA scaling tests for resource '{self.resource}' "
-                "are not supported yet."
+                "HPA scaling tests not supported for a given resource yet.",
+                context={"resource": self.resource},
             )
 
         return self

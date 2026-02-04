@@ -22,6 +22,6 @@ def ensure_pdb_not_violated(workload: WorkloadState, disruption_budget: int) -> 
 
     if remaining_pods < min_available:
         raise DisruptionExceedMinAvailabilityError(
-            f"Planned disruption leaves {remaining_pods} pods, but PDB requires "
-            f"at least {min_available} pods."
+            "Planned disruption violates PDB",
+            context={"pdb_min": min_available, "remaining": remaining_pods},
         )

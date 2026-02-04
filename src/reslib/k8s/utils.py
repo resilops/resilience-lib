@@ -3,7 +3,7 @@ from functools import lru_cache
 from typing import Dict, List, Optional, Tuple
 
 from kubernetes import config as k8config
-from kubernetes.client import V1Deployment, V1Pod
+from kubernetes.client import V1Deployment, V1Node, V1Pod
 from kubernetes.client.exceptions import ApiException
 
 from reslib.config import config
@@ -254,7 +254,8 @@ def get_workload(
     except ApiException as exc:
         if exc.status == 404:
             raise WorkloadNotFound(
-                f"Deployment '{name}' not found in namespace '{namespace}'"
+                "Deployment not found",
+                context={"deployment": name, "namespace": namespace},
             )
         raise
 
@@ -408,7 +409,7 @@ def calculate_hpa_trigger(
 
     if average_utilization is None:
         raise HpaNotConfiguredError(
-            "Missing 'averageUtilization'. HPA is misconfigured."
+            "Missing 'averageUtilization' or HPA is misconfigured."
         )
 
     replicas = workload.status.ready_replicas
@@ -453,9 +454,12 @@ def raise_on_container_fail(
             # Check for waiting state with abnormal reasons
             if state.waiting and state.waiting.reason not in POD_WAITING_REASONS_OK:
                 raise ContainerCrashedError(
-                    f"Pod '{pod_name}' container "
-                    f"'{container_name}' is waiting "
-                    f"unexpectedly: {state.waiting.reason}"
+                    "Pod container is waiting unexpectedly",
+                    context={
+                        "container": container_name,
+                        "pod": pod_name,
+                        "reason": state.waiting.reason,
+                    },
                 )
 
             # Check for terminated state with abnormal reasons
@@ -464,9 +468,12 @@ def raise_on_container_fail(
                 and state.terminated.reason not in POD_TERMINATED_REASONS_OK
             ):
                 raise ContainerCrashedError(
-                    f"Pod '{pod_name}' container '{container_name}' "
-                    f"terminated unexpectedly (reason={state.terminated.reason}, "
-                    f"exit_code={state.terminated.exit_code})"
+                    "Pod terminated unexpectedly",
+                    context={
+                        "container": container_name,
+                        "pod": pod,
+                        "reason": state.terminated.reason,
+                    },
                 )
 
 
@@ -496,8 +503,59 @@ def raise_on_hpa_scale(
     if current_replicas > start_replicas:
         raise HpaScaledError(
             "HPA scaled: replicas increased",
-            before=start_replicas,
-            after=current_replicas,
+            context={"before": start_replicas, "after": current_replicas},
         )
 
     return None
+
+
+def is_node_tolerated(node: V1Node, deployment: V1Deployment) -> bool:
+    """
+    Check if a pod with the deployment's tolerations can be scheduled on the node.
+
+    Returns True if all node taints are tolerated.
+    """
+    if not node.spec.taints:
+        return True  # No taints to worry about
+
+    for taint in node.spec.taints:
+        # If no toleration matches this taint, node is not tolerated
+        tolerated = any(
+            (not tol.effect or tol.effect == taint.effect)
+            and (
+                (tol.operator == "Exists" and (tol.key == taint.key or tol.key is None))
+                or (
+                    tol.operator == "Equal"
+                    and tol.key == taint.key
+                    and tol.value == taint.value
+                )
+            )
+            for tol in deployment.spec.template.spec.tolerations or []
+        )
+        if not tolerated:
+            return False  # Early exit: found an un-tolerated taint
+
+    return True  # All taints tolerated
+
+
+def get_schedulable_nodes(
+    k8s: KubernetesClient, deployment: V1Deployment
+) -> List[V1Node]:
+    """
+    Return only nodes that where pod can be scheduled and match the given toleration.
+
+    Args:
+        k8s: Kubernetes client instance.
+        deployment: Deployment
+
+    Returns:
+        List of schedulable nodes.
+    """
+    schedulable_nodes: List[V1Node] = []
+    for node in k8s.v1_api.list_node().items:
+        if node.spec.unschedulable:
+            continue
+        if is_node_tolerated(node, deployment):
+            schedulable_nodes.append(node)
+
+    return schedulable_nodes

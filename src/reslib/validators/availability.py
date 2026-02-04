@@ -21,12 +21,12 @@ def validate_min_remaining_replicas(
 
     if remaining <= 0:
         raise DisruptionExceedMinAvailabilityError(
-            f"Cannot terminate all pods; {total} pods available, "
-            f"{terminate} planned for termination."
+            "Cannot terminate all pods",
+            context={"total": total, "terminate": terminate},
         )
 
     if remaining < min_remaining:
         raise DisruptionExceedMinAvailabilityError(
-            f"At least {min_remaining} pods must remain after termination, "
-            f"but only {remaining} would remain."
+            "Does not meet minimum availability criteria",
+            context={"remaining": remaining, "min_required": min_remaining},
         )

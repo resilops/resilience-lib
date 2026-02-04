@@ -85,4 +85,8 @@ async def validate_hpa_cpu_scaling_guardrail(**kwargs) -> None:
     ensure_metrics_server_available(
         deployment=deployment, k8s=k8s, namespace=args.namespace
     )
+
+    # Ensure there is enough space to scale
+    # TODO: This need cluster role binding
+    # validate_can_deployment_scale(k8s=k8s, deployment=deployment, replicas_to_add=1)
     logger.info("HPA cpu scaling guardrail success")

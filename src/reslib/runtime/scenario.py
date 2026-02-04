@@ -69,22 +69,25 @@ async def _execute_phase(
             details=f"Phase: {phase.value} execution started",
         )
     )
-    error: Optional[Exception] = None
     try:
         for step in filter(lambda s: s.name and s.type == phase, scenario.steps):
             func: AsyncFunc = resolve(phase=step.type, name=step.name)
             await func(**scenario.template, **step.overrides, telemetry=telemetry)
+            telemetry.emit_event(
+                event=EventPayload(event_name=success_event, phase=phase)
+            )
     except Exception as exc:
-        error = exc
+        telemetry.emit_event(
+            event=EventPayload(
+                event_name=failure_event,
+                phase=phase,
+                details=str(exc),
+                error=exc.__class__.__name__,
+                context=getattr(exc, "context", None),
+            )
+        )
         logger.exception("Error executing the phase", extra={"phase": phase})
         raise exc
-    finally:
-        event = EventPayload(
-            event_name=failure_event if error else success_event,
-            phase=phase,
-            details=str(error) if error else None,
-        )
-        telemetry.emit_event(event=event)
 
 
 async def execute_resilience_scenario(

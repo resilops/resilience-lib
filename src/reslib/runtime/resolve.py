@@ -46,12 +46,14 @@ def _resolve_async_function(module: ModuleType, name: str) -> AsyncFunc:
     """
     exported = getattr(module, "__all__", [])
     if name not in exported:
-        raise FunctionNotFound(f"'{name}' is not exported by module {module.__name__}")
+        raise FunctionNotFound("Function not available", context={"function": name})
 
     func: AsyncFunc = getattr(module, name)
 
     if not inspect.iscoroutinefunction(func):
-        raise InvalidAsyncHandler(f"'{name}' in module {module.__name__} must be async")
+        raise InvalidAsyncHandler(
+            "Invalid async handler", context={"name": name, "module": module.__name__}
+        )
 
     return func
 

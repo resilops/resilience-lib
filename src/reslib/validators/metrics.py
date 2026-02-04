@@ -44,19 +44,24 @@ def ensure_metrics_server_available(
     except ApiException as e:
         # Catch forbidden, not found, or other API errors
         raise MetricsServerUnavailableError(
-            f"Cannot access metrics for pod '{pod_name}' in namespace '{namespace}': "
-            f"{e.reason} (HTTP {e.status})"
+            "Cannot access metrics for a given pod",
+            context={
+                "pod": pod_name,
+                "namespace": namespace,
+                "reason": e.reason,
+                "status": e.status,
+            },
         ) from e
     except Exception as e:
         raise MetricsServerUnavailableError(
-            f"Unexpected error while querying metrics for pod '{pod_name}' "
-            f"in namespace '{namespace}': {str(e)}"
+            "Unexpected error while querying metrics for given pod",
+            context={"pod": pod_name, "namespace": namespace, "reason": str(e)},
         ) from e
 
     if not metrics.get("containers"):
         raise MetricsServerUnavailableError(
-            f"No metrics available for workload '{deployment.metadata.name}' "
-            f"in namespace '{namespace}'. HPA scaling may not work."
+            "No metrics available for workload",
+            context={"deployment": deployment.metadata.name, "namespace": namespace},
         )
 
     return pods

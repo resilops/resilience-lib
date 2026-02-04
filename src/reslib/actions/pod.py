@@ -98,8 +98,7 @@ async def terminate_pods(**kwargs) -> None:
 
     if pods_to_terminate <= 0:
         raise PodsSelectionError(
-            f"Pods to terminate: {pods_to_terminate}. "
-            f"Either change percentage or use absolute quantity"
+            "No pods selected for termination", context={"pods": pods_to_terminate}
         )
 
     # 3. List candidate pods
@@ -114,7 +113,7 @@ async def terminate_pods(**kwargs) -> None:
 
     if not candidate_pods:
         raise PodsSelectionError(
-            f"No running pods found to terminate for {args.namespace}/{args.workload}"
+            "No running pods found to terminate", context={"pods": len(candidate_pods)}
         )
 
     # 4. Terminate pods concurrently

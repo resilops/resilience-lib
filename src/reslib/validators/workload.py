@@ -30,18 +30,24 @@ def ensure_workload_steady(workload: WorkloadState) -> None:
 
     if not status:
         raise WorkloadStatusUnavailableError(
-            f"Workload '{workload.spec.name}' status is unavailable"
+            "Workload status is unavailable",
+            context={"name": workload.spec.name, "status": status},
         )
 
     if status.reconciling:
         raise WorkloadReconcilingError(
-            f"Workload '{workload.spec.name}' is currently reconciling"
+            "Workload is currently reconciling",
+            context={"name": workload.spec.name, "status": "reconciling"},
         )
 
     if not status.is_available:
         raise WorkloadNotAvailableError(
-            f"Workload '{workload.spec.name}' is not available/stable"
+            "Workload is not available/stable",
+            context={"name": workload.spec.name, "status": "unavailable"},
         )
 
     if status.is_faulty:
-        raise WorkloadFaultyError(f"Workload '{workload.spec.name}' is faulty")
+        raise WorkloadFaultyError(
+            "Workload is faulty",
+            context={"name": workload.spec.name, "status": "faulty"},
+        )

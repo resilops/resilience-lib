@@ -1,15 +1,27 @@
+import logging
 import math
-from typing import Optional
+from typing import List, Optional
 
+from kubernetes.client import V1Deployment, V1Node
+
+from reslib import helpers as h
 from reslib.constants import HpaMetricTypeEnum, HpaResourceNameEnum
+from reslib.k8s.client import KubernetesClient
 from reslib.k8s.exceptions import (
     HpaMetricsNotFoundError,
     HpaNotConfiguredError,
+    InsufficientMemoryError,
     PodsToStressExceededError,
     WorkloadAtMaxError,
 )
 from reslib.k8s.schema import HPAConfig, HPAMetricSpec, WorkloadState
-from reslib.k8s.utils import calculate_hpa_trigger, get_hpa_resource_metric
+from reslib.k8s.utils import (
+    calculate_hpa_trigger,
+    get_hpa_resource_metric,
+    get_schedulable_nodes,
+)
+
+logger = logging.getLogger(__name__)
 
 
 def validate_hpa_resource_metric(
@@ -36,8 +48,8 @@ def validate_hpa_resource_metric(
 
     if hpa_metric is None:
         raise HpaMetricsNotFoundError(
-            f"Couldn't find HPA metric type: {metric_type.value} "
-            f"and resource: {resource.value}"
+            "Couldn't find HPA metric type",
+            context={"metric_type": metric_type, "resource": resource.value},
         )
 
     return hpa_metric
@@ -58,7 +70,8 @@ def ensure_hpa_exists(workload: WorkloadState) -> HPAConfig:
     """
     if not workload.spec.hpa:
         raise HpaNotConfiguredError(
-            f"HPA is not configured for workload '{workload.spec.name}'"
+            "HPA is not configured for workload",
+            context={"deployment": workload.spec.name},
         )
     return workload.spec.hpa
 
@@ -77,8 +90,8 @@ def ensure_not_at_max_replicas(workload: WorkloadState) -> None:
     max_replicas = workload.spec.hpa.max_replicas
     if ready >= max_replicas:
         raise WorkloadAtMaxError(
-            f"Workload has reached/exceeded its HPA maximum replica count "
-            f"(ready_replicas={ready}, max_replicas={max_replicas})"
+            "Workload is at max load.",
+            context={"current_replicas": ready, "hpa_max": max_replicas},
         )
 
 
@@ -126,9 +139,64 @@ def validate_pods_to_stress_cpu(
 
     if pods_to_stress > max_pods_can_stress:
         raise PodsToStressExceededError(
-            f"Calculated pods to stress ({pods_to_stress}) exceeds limit "
-            f"(ready_replicas={workload.status.ready_replicas}, "
-            f"min_idle_pods_count={min_idle_pods_count})"
+            "Total pods to stress exceeds the safety limit",
+            context={
+                "pods_to_stress": pods_to_stress,
+                "required_idle_pods": min_idle_pods_count,
+                "current_replicas": workload.status.ready_replicas,
+            },
         )
 
     return pods_to_stress
+
+
+def validate_can_deployment_scale(
+    k8s: KubernetesClient,
+    deployment: V1Deployment,
+    replicas_to_add: int = 1,
+) -> bool:
+    """
+    Check if the cluster has enough memory to scale the deployment by `replicas_to_add`.
+
+    Args:
+        k8s: Kubernetes client instance.
+        deployment: Deployment object.
+        replicas_to_add: Number of replicas you want to add.
+
+    Returns:
+        True if there is enough memory to schedule the additional replicas.
+
+    Raises:
+        InsufficientMemoryError: If there is not enough memory in any node.
+    """
+    # 1. Get the resource requests of the containers in the deployment
+    total_mem_request_bytes = 0
+    for c in deployment.spec.template.spec.containers:
+        mem = c.resources.requests.get("memory", "0") if c.resources.requests else "0"
+        total_mem_request_bytes += h.convert_to_bytes(mem)
+
+    total_mem_request_bytes *= replicas_to_add
+
+    # 2. Fetch all nodes and their allocatable memory
+    nodes: List[V1Node] = get_schedulable_nodes(k8s=k8s, deployment=deployment)
+
+    for node in nodes:
+        alloc_mem = node.status.allocatable.get("memory", "0")
+        alloc_bytes = h.convert_to_bytes(alloc_mem)
+        if alloc_bytes >= total_mem_request_bytes:
+            logger.info(
+                f"Available memory: {alloc_bytes} "
+                f"Required memory: {total_mem_request_bytes}"
+            )
+            return True
+
+    raise InsufficientMemoryError(
+        "Insufficient memory to scale deployment",
+        context={
+            "deployment": deployment.metadata.name,
+            "additional_replicas": replicas_to_add,
+            "available_memory": [
+                node.status.allocatable.get("memory") for node in nodes
+            ],
+        },
+    )
