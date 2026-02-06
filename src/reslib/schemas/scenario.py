@@ -35,18 +35,18 @@ class ObserverConfig(BaseModel):
     """
     Configuration for observer timing.
 
-    - `sampling_interval`: how often the observer polls the system (in seconds)
-    - `warmup_period`: initial period to skip measurements (in seconds)
-    - `grace_period`: period to allow for stabilization after action (in seconds)
+    - `sampling_interval_seconds`: how often the observer polls the system
+    - `warmup_period_seconds`: initial period to skip measurements
+    - `grace_period_seconds`: period to allow for stabilization after action
     """
 
-    sampling_interval: int = Field(
+    sampling_interval_seconds: int = Field(
         default=5, ge=1, description="Interval between observer samples in seconds."
     )
-    warmup_period: int = Field(
+    warmup_period_seconds: int = Field(
         default=0, description="Initial warmup period before measurements in seconds."
     )
-    grace_period: int = Field(
+    grace_period_seconds: int = Field(
         default=0, description="Grace period to allow system stabilization in seconds."
     )
 

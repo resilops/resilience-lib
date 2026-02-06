@@ -3,13 +3,13 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
-from reslib.constants import HpaMetricTypeEnum, K8DeploymentKind
+from reslib.constants import HpaMetricSourceEnum, K8DeploymentKind
 
 
 class HPAMetricSpec(BaseModel):
     """Horizontal Pod Autoscaler metrics."""
 
-    type: HpaMetricTypeEnum
+    type: HpaMetricSourceEnum
     resource: Dict[Any, Any] = Field(
         default_factory=dict, description="HPA resource dict"
     )
@@ -18,6 +18,7 @@ class HPAMetricSpec(BaseModel):
 class HPAConfig(BaseModel):
     """Horizontal Pod Autoscaler configuration."""
 
+    name: str
     min_replicas: int = Field(..., ge=1, description="Minimum number of replicas")
     max_replicas: int = Field(..., ge=1, description="Maximum number of replicas")
     metrics: List[HPAMetricSpec] = Field(..., description="HPA metrics")
@@ -42,6 +43,10 @@ class WorkloadSpec(BaseModel):
     replicas: int = Field(..., ge=0, description="Desired number of replicas")
     hpa: Optional[HPAConfig] = Field(
         default=None, description="HPA configuration if present"
+    )
+    labels: Dict[str, str] = Field(
+        default_factory=dict,
+        description="Pod labels to select pods belonging to this workload",
     )
 
 

@@ -1,15 +1,15 @@
 import logging
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from kubernetes import config as k8sconfig
 
 from reslib import helpers as h
 from reslib.config import config
 from reslib.constants import AsyncFunc, EventEnum
-from reslib.core.context import ObserverContext
+from reslib.core.context import ObserverContext, ScenarioContext, get_context
 from reslib.logging import setup_logging
+from reslib.runtime import resolve as resolver
 from reslib.runtime.phases import ExecutionPhase
-from reslib.runtime.resolve import resolve
 from reslib.schemas.scenario import ResiliencyScenario
 from reslib.schemas.telemetry import EventPayload
 
@@ -42,7 +42,6 @@ async def _execute_phase(
     start_event: EventEnum,
     success_event: EventEnum,
     failure_event: EventEnum,
-    telemetry: h.BaseTelemetry,
 ) -> None:
     """
     Execute a single phase of a resilience scenario and emit telemetry events.
@@ -60,8 +59,8 @@ async def _execute_phase(
         start_event: Event recorded on execution phase start.
         success_event: Event recorded on successful execution.
         failure_event: Event recorded on failure.
-        telemetry: Telemetry recorder for emitting lifecycle events.
     """
+    telemetry = get_context("telemetry")
     telemetry.emit_event(
         event=EventPayload(
             event_name=start_event,
@@ -69,25 +68,31 @@ async def _execute_phase(
             details=f"Phase: {phase.value} execution started",
         )
     )
-    try:
-        for step in filter(lambda s: s.name and s.type == phase, scenario.steps):
-            func: AsyncFunc = resolve(phase=step.type, name=step.name)
-            await func(**scenario.template, **step.overrides, telemetry=telemetry)
+    results: Dict[str, Any] = {}
+
+    for step in filter(lambda s: s.name and s.type == phase, scenario.steps):
+        try:
+            func: AsyncFunc = resolver.resolve(phase=step.type, name=step.name)
+            result = await func(**scenario.template, **step.overrides)
+            results[step.name] = result
+        except Exception as exc:
+            results[step.name] = getattr(exc, "context", None)
             telemetry.emit_event(
-                event=EventPayload(event_name=success_event, phase=phase)
+                event=EventPayload(
+                    event_name=failure_event,
+                    phase=phase,
+                    details=str(exc),
+                    error=exc.__class__.__name__,
+                    return_data=results,
+                )
             )
-    except Exception as exc:
-        telemetry.emit_event(
-            event=EventPayload(
-                event_name=failure_event,
-                phase=phase,
-                details=str(exc),
-                error=exc.__class__.__name__,
-                context=getattr(exc, "context", None),
-            )
-        )
-        logger.exception("Error executing the phase", extra={"phase": phase})
-        raise exc
+            logger.exception("Error executing the phase", extra={"phase": phase})
+            raise exc
+
+    # Success
+    telemetry.emit_event(
+        event=EventPayload(event_name=success_event, phase=phase, return_data=results)
+    )
 
 
 async def execute_resilience_scenario(
@@ -114,33 +119,32 @@ async def execute_resilience_scenario(
                    Defaults to a no-op telemetry implementation if not provided.
     """
     _lib_setup()
-    telemetry = telemetry or h.NoopTelemetry()
 
-    # 1. Guardrail phase (fatal if validation fails)
-    await _execute_phase(
-        scenario=scenario,
-        phase=ExecutionPhase.GUARDRAIL,
-        start_event=EventEnum.GUARDRAIL_STARTED,
-        success_event=EventEnum.GUARDRAIL_SUCCESS,
-        failure_event=EventEnum.GUARDRAIL_FAILED,
-        telemetry=telemetry,
-    )
-
-    # 2. Action and rollback phases with observer context
-    async with ObserverContext(telemetry=telemetry, spec=scenario.observer):
+    async with ScenarioContext(
+        scenario=scenario, telemetry=telemetry or h.NoopTelemetry()
+    ):
+        # 1. Guardrail phase (fatal if validation fails)
         await _execute_phase(
             scenario=scenario,
-            phase=ExecutionPhase.ACTION,
-            start_event=EventEnum.ACTION_STARTED,
-            success_event=EventEnum.ACTION_SUCCESS,
-            failure_event=EventEnum.ACTION_FAILED,
-            telemetry=telemetry,
+            phase=ExecutionPhase.GUARDRAIL,
+            start_event=EventEnum.GUARDRAIL_STARTED,
+            success_event=EventEnum.GUARDRAIL_SUCCESS,
+            failure_event=EventEnum.GUARDRAIL_FAILED,
         )
-        await _execute_phase(
-            scenario=scenario,
-            phase=ExecutionPhase.ROLLBACK,
-            start_event=EventEnum.ROLLBACK_STARTED,
-            success_event=EventEnum.ROLLBACK_SUCCESS,
-            failure_event=EventEnum.ROLLBACK_FAILED,
-            telemetry=telemetry,
-        )
+
+        # 2. Action and rollback phases with observer context
+        async with ObserverContext(resolver=resolver):
+            await _execute_phase(
+                scenario=scenario,
+                phase=ExecutionPhase.ACTION,
+                start_event=EventEnum.ACTION_STARTED,
+                success_event=EventEnum.ACTION_SUCCESS,
+                failure_event=EventEnum.ACTION_FAILED,
+            )
+            await _execute_phase(
+                scenario=scenario,
+                phase=ExecutionPhase.ROLLBACK,
+                start_event=EventEnum.ROLLBACK_STARTED,
+                success_event=EventEnum.ROLLBACK_SUCCESS,
+                failure_event=EventEnum.ROLLBACK_FAILED,
+            )

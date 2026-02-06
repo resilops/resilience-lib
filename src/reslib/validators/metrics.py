@@ -1,15 +1,16 @@
 from typing import List
 
-from kubernetes.client import V1Deployment, V1Pod
+from kubernetes.client import V1Pod
 from kubernetes.client.rest import ApiException
 
 from reslib.k8s.client import KubernetesClient
 from reslib.k8s.exceptions import MetricsServerUnavailableError
-from reslib.k8s.utils import get_deployment_pods
+from reslib.k8s.schema import WorkloadSpec
+from reslib.k8s.utils import get_workload_pods
 
 
 def ensure_metrics_server_available(
-    k8s: KubernetesClient, deployment: V1Deployment, namespace: str
+    k8s: KubernetesClient, workload_spec: WorkloadSpec, namespace: str
 ) -> List[V1Pod]:
     """
     Ensure that the Kubernetes Metrics Server is available and reporting metrics
@@ -20,7 +21,7 @@ def ensure_metrics_server_available(
 
     Args:
         k8s: Kubernetes client instance.
-        deployment: Deployment to validate.
+        workload_spec: WorkloadSpec to validate.
         namespace: Namespace of the deployment.
 
     Returns:
@@ -30,7 +31,7 @@ def ensure_metrics_server_available(
         MetricsServerUnavailableError: If no pods or metrics are available for
             the deployment, or if access is forbidden.
     """
-    pods = get_deployment_pods(k8s=k8s, namespace=namespace, deployment=deployment)
+    pods = get_workload_pods(k8s=k8s, namespace=namespace, workload_spec=workload_spec)
     pod_name = pods[0].metadata.name
 
     try:
@@ -61,7 +62,7 @@ def ensure_metrics_server_available(
     if not metrics.get("containers"):
         raise MetricsServerUnavailableError(
             "No metrics available for workload",
-            context={"deployment": deployment.metadata.name, "namespace": namespace},
+            context={"deployment": workload_spec.name, "namespace": namespace},
         )
 
     return pods

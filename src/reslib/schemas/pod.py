@@ -1,6 +1,5 @@
 from pydantic import BaseModel, ConfigDict, Field
 
-from reslib import helpers as h
 from reslib.constants import QuantitySelectionModeEnum
 
 
@@ -29,9 +28,15 @@ class PodTerminationArgsTemplate(BaseModel):
     respect_pdb: bool = Field(
         default=True, description="Whether to enforce PodDisruptionBudget rules."
     )
-    telemetry: h.BaseTelemetry = Field(
-        default_factory=h.NoopTelemetry,
-        description="Telemetry recorder to log metrics.",
+    pod_respawn_timeout_seconds: int = Field(
+        default=300,
+        ge=1,
+        description="Timeout to respawn a new pod",
+    )
+    termination_timeout_seconds: int = Field(
+        default=300,
+        le=300,
+        description="Default timeout for selected the pods termination",
     )
 
 
@@ -40,7 +45,7 @@ class WorkloadStabilityArgs(BaseModel):
 
     model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
 
-    wait_for_stability: int = Field(
+    max_wait_for_stability: int = Field(
         default=60,
         ge=1,
         description="Wait for x seconds to stabilize workload",

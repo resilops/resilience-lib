@@ -39,8 +39,8 @@ async def validate_hpa_cpu_scaling_guardrail(**kwargs) -> None:
         **kwargs: Arguments matching HpaScalingGuardrailArgs
             - namespace (str): Kubernetes namespace of the workload.
             - workload (str): Name of the workload.
-            - metric_type (HpaMetricTypeEnum): Type of HPA metric.
-            - resource (HpaResourceNameEnum): Resource name (CPU, memory).
+            - metric_source (HpaMetricSourceEnum): Type of HPA metric.
+            - resource (HpaResourceTypeEnum): Resource name (CPU, memory).
 
     Returns:
         None
@@ -52,10 +52,6 @@ async def validate_hpa_cpu_scaling_guardrail(**kwargs) -> None:
 
     # Discover the workload in the cluster
     workload: WorkloadState = get_workload(namespace=args.namespace, name=args.workload)
-    deployment = k8s.apps.read_namespaced_deployment(
-        name=args.workload,
-        namespace=args.namespace,
-    )
 
     # Ensure the workload is steady (ready, not reconciling, not faulty)
     ensure_workload_steady(workload=workload)
@@ -65,16 +61,18 @@ async def validate_hpa_cpu_scaling_guardrail(**kwargs) -> None:
 
     # Check if hpa scaling behaviour / resource is supported
     validate_hpa_resource_metric(
-        hpa=workload.spec.hpa, metric_type=args.metric_type, resource=args.resource
+        hpa=workload.spec.hpa,
+        metric_source=args.metric_source,
+        resource_type=args.resource_type,
     )
 
     # Make sure we don't stress pod that can cause downtime
     validate_pods_to_stress_cpu(
         workload=workload,
-        metric_type=args.metric_type,
-        resource=args.resource,
+        metric_source=args.metric_source,
+        resource_type=args.resource_type,
         idle_cpu_pct=args.idle_cpu_pct,
-        max_cpu_stress_pct_per_pod=args.max_cpu_stress_pct_per_pod,
+        pod_cpu_stress_threshold_pct=args.pod_cpu_stress_threshold_pct,
         min_pods_idle_pct=args.min_pods_idle_pct,
     )
 
@@ -83,7 +81,7 @@ async def validate_hpa_cpu_scaling_guardrail(**kwargs) -> None:
 
     # Make sure metrics server is available
     ensure_metrics_server_available(
-        deployment=deployment, k8s=k8s, namespace=args.namespace
+        workload_spec=workload.spec, k8s=k8s, namespace=args.namespace
     )
 
     # Ensure there is enough space to scale

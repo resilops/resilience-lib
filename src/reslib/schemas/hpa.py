@@ -2,12 +2,11 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from reslib import helpers as h
 from reslib.constants import (
-    SUPPORTED_HPA_METRIC_TYPES,
-    SUPPORTED_HPA_RESOURCE_NAMES,
-    HpaMetricTypeEnum,
-    HpaResourceNameEnum,
+    SUPPORTED_HPA_METRIC_SOURCES,
+    SUPPORTED_HPA_RESOURCE_TYPES,
+    HpaMetricSourceEnum,
+    HpaResourceTypeEnum,
 )
 from reslib.exceptions import NotSupportedError
 
@@ -21,7 +20,7 @@ class HpaCPUStressArgsTemplate(BaseModel):
     safely calculate and apply CPU stress without causing downtime.
     """
 
-    model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
+    model_config = ConfigDict(extra="allow")
 
     namespace: str = Field(..., description="Kubernetes namespace of the workload.")
     workload: str = Field(..., description="Name of the workload")
@@ -32,11 +31,11 @@ class HpaCPUStressArgsTemplate(BaseModel):
             "container will be selected."
         ),
     )
-    metric_type: HpaMetricTypeEnum = Field(
+    metric_source: HpaMetricSourceEnum = Field(
         ...,
         description="Type of HPA metric to test scaling against (e.g., CPU, memory).",
     )
-    resource: HpaResourceNameEnum = Field(
+    resource_type: HpaResourceTypeEnum = Field(
         ...,
         description="Specific resource name for the metric (e.g., 'cpu', 'memory').",
     )
@@ -46,7 +45,7 @@ class HpaCPUStressArgsTemplate(BaseModel):
         le=100,
         description="Estimated CPU percentage used by a pod when idle (baseline).",
     )
-    max_cpu_stress_pct_per_pod: int = Field(
+    pod_cpu_stress_threshold_pct: int = Field(
         default=95,
         gt=0,
         le=95,  # Cap stress to avoid pod down
@@ -55,7 +54,7 @@ class HpaCPUStressArgsTemplate(BaseModel):
     min_pods_idle_pct: int = Field(
         default=20, le=100, description="Exclude % pods from stress tests"
     )
-    max_stress_duration: int = Field(
+    max_stress_duration_seconds: int = Field(
         120,
         ge=30,
         le=600,  # Some upper limit.
@@ -64,10 +63,10 @@ class HpaCPUStressArgsTemplate(BaseModel):
             "stress begins. Default is 120s."
         ),
     )
-
-    telemetry: h.BaseTelemetry = Field(
-        default_factory=h.NoopTelemetry,
-        description="Telemetry recorder to log metrics.",
+    hpa_scale_down_timeout_seconds: int = Field(
+        500,
+        le=1200,  # Some upper limit.
+        description="Max time it takes for the pods to scale down",
     )
 
     @model_validator(mode="after")
@@ -78,13 +77,13 @@ class HpaCPUStressArgsTemplate(BaseModel):
         Raises:
             NotSupportedError: If the metric type or resource is not supported.
         """
-        if self.metric_type not in SUPPORTED_HPA_METRIC_TYPES:
+        if self.metric_source not in SUPPORTED_HPA_METRIC_SOURCES:
             raise NotSupportedError(
                 "HPA scaling tests not supported for a given metrics yet.",
-                context={"metric_type": self.metric_type},
+                context={"metric_source": self.metric_source},
             )
 
-        if self.resource not in SUPPORTED_HPA_RESOURCE_NAMES:
+        if self.resource_type not in SUPPORTED_HPA_RESOURCE_TYPES:
             raise NotSupportedError(
                 "HPA scaling tests not supported for a given resource yet.",
                 context={"resource": self.resource},

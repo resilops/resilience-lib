@@ -5,7 +5,7 @@ from typing import List, Optional
 from kubernetes.client import V1Deployment, V1Node
 
 from reslib import helpers as h
-from reslib.constants import HpaMetricTypeEnum, HpaResourceNameEnum
+from reslib.constants import HpaMetricSourceEnum, HpaResourceTypeEnum
 from reslib.k8s.client import KubernetesClient
 from reslib.k8s.exceptions import (
     HpaMetricsNotFoundError,
@@ -25,15 +25,17 @@ logger = logging.getLogger(__name__)
 
 
 def validate_hpa_resource_metric(
-    hpa: HPAConfig, metric_type: HpaMetricTypeEnum, resource: HpaResourceNameEnum
+    hpa: HPAConfig,
+    metric_source: HpaMetricSourceEnum,
+    resource_type: HpaResourceTypeEnum,
 ) -> HPAMetricSpec:
     """
     Validate that an HPA has a metric of the specified type and resource.
 
     Args:
         hpa: HPA configuration to check.
-        metric_type: Type of metric to validate (e.g., RESOURCE).
-        resource: Resource name (e.g., CPU or MEMORY).
+        metric_source: Type of metric to validate (e.g., RESOURCE).
+        resource_type: Resource name (e.g., CPU or MEMORY).
 
     Returns:
         HPAMetricSpec corresponding to the metric.
@@ -43,13 +45,16 @@ def validate_hpa_resource_metric(
         metric/resource.
     """
     hpa_metric: Optional[HPAMetricSpec] = get_hpa_resource_metric(
-        hpa=hpa, metric_type=metric_type, resource=resource
+        hpa=hpa, metric_source=metric_source, resource_type=resource_type
     )
 
     if hpa_metric is None:
         raise HpaMetricsNotFoundError(
             "Couldn't find HPA metric type",
-            context={"metric_type": metric_type, "resource": resource.value},
+            context={
+                "metric_source": metric_source,
+                "resource_type": resource_type.value,
+            },
         )
 
     return hpa_metric
@@ -97,10 +102,10 @@ def ensure_not_at_max_replicas(workload: WorkloadState) -> None:
 
 def validate_pods_to_stress_cpu(
     workload: WorkloadState,
-    metric_type: HpaMetricTypeEnum,
-    resource: HpaResourceNameEnum,
+    metric_source: HpaMetricSourceEnum,
+    resource_type: HpaResourceTypeEnum,
     idle_cpu_pct: int,
-    max_cpu_stress_pct_per_pod: int,
+    pod_cpu_stress_threshold_pct: int,
     min_pods_idle_pct: int,
 ) -> int:
     """
@@ -108,10 +113,10 @@ def validate_pods_to_stress_cpu(
 
     Args:
         workload: Workload to stress.
-        metric_type: Metric type (e.g., RESOURCE).
-        resource: Resource to stress (CPU).
+        metric_source: Metric type (e.g., RESOURCE).
+        resource_type: Resource to stress (CPU).
         idle_cpu_pct: Baseline idle CPU usage per pod.
-        max_cpu_stress_pct_per_pod: Maximum CPU usage per stressed pod.
+        pod_cpu_stress_threshold_pct: Maximum CPU usage per stressed pod.
         min_pods_idle_pct: Minimum percentage of pods that must remain
                            idle (not stressed).
 
@@ -122,14 +127,14 @@ def validate_pods_to_stress_cpu(
         PodsToStressExceededError: If calculated pods to stress exceeds allowable limit.
     """
     hpa_metric = get_hpa_resource_metric(
-        hpa=workload.spec.hpa, metric_type=metric_type, resource=resource
+        hpa=workload.spec.hpa, metric_source=metric_source, resource_type=resource_type
     )
 
     pods_to_stress, _ = calculate_hpa_trigger(
-        workload=workload,
+        status=workload.status,
         metric=hpa_metric,
         idle_cpu_pct=idle_cpu_pct,
-        max_cpu_stress_pct_per_pod=max_cpu_stress_pct_per_pod,
+        pod_cpu_stress_threshold_pct=pod_cpu_stress_threshold_pct,
     )
 
     min_idle_pods_count = math.ceil(

@@ -17,3 +17,7 @@ class InvalidAsyncHandler(ExceptionWithContext):
 
 class NotSupportedError(ExceptionWithContext):
     pass
+
+
+class ScenarioContextError(ExceptionWithContext):
+    pass

@@ -67,3 +67,11 @@ class InsufficientMemoryError(ExceptionWithContext):
 
 class HpaScaledError(ExceptionWithContext):
     pass
+
+
+class ReachedDesiredReplicaError(ExceptionWithContext):
+    pass
+
+
+class ReplicasRestoredError(ExceptionWithContext):
+    pass

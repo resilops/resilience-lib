@@ -8,12 +8,12 @@ from reslib.k8s.schema import (
     NamespaceState,
     WorkloadState,
 )
-from reslib.k8s.status import current_cluster_name
 from reslib.k8s.utils import (
-    build_workload_policies,
-    build_workload_spec,
-    build_workload_status,
+    current_cluster_name,
     get_namespace_snapshot,
+    get_workload_policies,
+    get_workload_spec,
+    get_workload_status,
 )
 
 
@@ -43,9 +43,9 @@ def discover_workloads(
 
     for deployment in deployments:
         yield WorkloadState(
-            spec=build_workload_spec(snapshot=snapshot, deployment=deployment),
-            policies=build_workload_policies(snapshot=snapshot, deployment=deployment),
-            status=build_workload_status(deployment),
+            spec=get_workload_spec(snapshot=snapshot, deployment=deployment),
+            policies=get_workload_policies(snapshot=snapshot, deployment=deployment),
+            status=get_workload_status(deployment),
         )
 
 

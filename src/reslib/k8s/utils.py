@@ -1,9 +1,10 @@
+import logging
 import math
 from functools import lru_cache
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from kubernetes import config as k8config
-from kubernetes.client import V1Deployment, V1Node, V1Pod
+from kubernetes.client import V1Deployment, V1Node, V1Pod, V2HorizontalPodAutoscaler
 from kubernetes.client.exceptions import ApiException
 
 from reslib.config import config
@@ -16,8 +17,8 @@ from reslib.constants import (
     POD_RUNNING_STATUS,
     POD_TERMINATED_REASONS_OK,
     POD_WAITING_REASONS_OK,
-    HpaMetricTypeEnum,
-    HpaResourceNameEnum,
+    HpaMetricSourceEnum,
+    HpaResourceTypeEnum,
     K8DeploymentKind,
 )
 from reslib.k8s.client import KubernetesClient
@@ -25,6 +26,8 @@ from reslib.k8s.exceptions import (
     ContainerCrashedError,
     HpaNotConfiguredError,
     HpaScaledError,
+    ReachedDesiredReplicaError,
+    ReplicasRestoredError,
     WorkloadNotFound,
 )
 from reslib.k8s.schema import (
@@ -37,6 +40,8 @@ from reslib.k8s.schema import (
     WorkloadStatus,
 )
 from reslib.k8s.snapshot import NamespaceSnapshot
+
+logger = logging.getLogger(__name__)
 
 
 def current_cluster_name() -> str:
@@ -157,7 +162,7 @@ def get_namespace_snapshot(namespace: str) -> NamespaceSnapshot:
     )
 
 
-def build_workload_spec(
+def get_workload_spec(
     snapshot: NamespaceSnapshot, deployment: V1Deployment
 ) -> WorkloadSpec:
     """
@@ -173,6 +178,7 @@ def build_workload_spec(
         replicas=deployment.spec.replicas or 0,
         hpa=(
             HPAConfig(
+                name=hpa.metadata.name,
                 min_replicas=hpa.spec.min_replicas,
                 max_replicas=hpa.spec.max_replicas,
                 metrics=[
@@ -183,10 +189,11 @@ def build_workload_spec(
             if hpa
             else None
         ),
+        labels=deployment.spec.selector.match_labels or {},
     )
 
 
-def build_workload_policies(
+def get_workload_policies(
     snapshot: NamespaceSnapshot, deployment: V1Deployment
 ) -> WorkloadPolicies:
     """
@@ -208,7 +215,7 @@ def build_workload_policies(
     )
 
 
-def build_workload_status(deployment: V1Deployment) -> WorkloadStatus:
+def get_workload_status(deployment: V1Deployment) -> WorkloadStatus:
     """Build the current WorkloadStatus from a Deployment."""
     return WorkloadStatus(
         ready_replicas=deployment.status.ready_replicas or 0,
@@ -260,9 +267,9 @@ def get_workload(
         raise
 
     return WorkloadState(
-        spec=build_workload_spec(snapshot=snapshot, deployment=deployment),
-        policies=build_workload_policies(snapshot=snapshot, deployment=deployment),
-        status=build_workload_status(deployment),
+        spec=get_workload_spec(snapshot=snapshot, deployment=deployment),
+        policies=get_workload_policies(snapshot=snapshot, deployment=deployment),
+        status=get_workload_status(deployment),
     )
 
 
@@ -297,7 +304,7 @@ def get_pod_termination_timeout(
     pods: List[V1Pod],
     buffer_seconds: int = 10,
     default_grace_period: int = config.pod_termination_default_grace_period,
-    max_timeout: int = config.pod_termination_max_timeout,
+    max_timeout: int = 300,
 ) -> int:
     """
     Compute a safe timeout for Pod termination.
@@ -317,7 +324,7 @@ def get_pod_termination_timeout(
         Timeout in seconds.
     """
     if not pods:
-        return min(default_grace_period + buffer_seconds, max_timeout)
+        raise ValueError("No pods given to calculate timeout")
 
     max_grace = max(
         pod.spec.termination_grace_period_seconds or default_grace_period
@@ -329,31 +336,34 @@ def get_pod_termination_timeout(
 
 def get_hpa_resource_metric(
     hpa: HPAConfig,
-    metric_type: HpaMetricTypeEnum,
-    resource: HpaResourceNameEnum,
+    metric_source: HpaMetricSourceEnum,
+    resource_type: HpaResourceTypeEnum,
 ) -> Optional[HPAMetricSpec]:
     """
     Return the HPA metric matching the given metric type and resource.
 
     Args:
         hpa: HPA configuration containing metric specifications.
-        metric_type: HPA metric type (e.g. RESOURCE).
-        resource: Resource name (CPU or MEMORY).
+        metric_source: HPA metric type (e.g. RESOURCE).
+        resource_type: Resource name (CPU or MEMORY).
 
     Returns:
         The matching HPAMetricSpec if found, otherwise None.
     """
     for metric in hpa.metrics:
-        if metric.type == metric_type and metric.resource.get("name") == resource.value:
+        if (
+            metric.type == metric_source
+            and metric.resource.get("name") == resource_type.value
+        ):
             return metric
     return None
 
 
-def get_deployment_pods(
+def get_workload_pods(
     *,
     k8s: KubernetesClient,
     namespace: str,
-    deployment: V1Deployment,
+    workload_spec: WorkloadSpec,
     pod_phase: Optional[str] = POD_RUNNING_STATUS,
 ) -> List[V1Pod]:
     """
@@ -362,20 +372,14 @@ def get_deployment_pods(
     Kwargs:
         k8s: Kubernetes client wrapper.
         namespace: Namespace where the workload is deployed.
-        deployment: Kubernetes Deployment object.
+        label_selector: Label selector to get pod.
         pod_phase: Pod phase to filter by (default: Running).
 
     Returns:
         List of pods matching the workload selector and pod phase.
     """
-    selector = ",".join(
-        f"{key}={value}" for key, value in deployment.spec.selector.match_labels.items()
-    )
-
-    pods = k8s.v1_api.list_namespaced_pod(
-        namespace=namespace,
-        label_selector=selector,
-    )
+    selector = ",".join(f"{key}={value}" for key, value in workload_spec.labels.items())
+    pods = k8s.v1_api.list_namespaced_pod(namespace=namespace, label_selector=selector)
 
     if pod_phase is None:
         return [pod for pod in pods.items]
@@ -384,19 +388,19 @@ def get_deployment_pods(
 
 
 def calculate_hpa_trigger(
-    workload: WorkloadState,
+    status: WorkloadStatus,
     metric: HPAMetricSpec,
     idle_cpu_pct: int,
-    max_cpu_stress_pct_per_pod: Optional[int] = 95,
+    pod_cpu_stress_threshold_pct: Optional[int] = 95,
 ) -> Tuple[int, int]:
     """
     Calculate the minimal number of pods and CPU percentage per pod to trigger HPA.
 
     Args:
-        workload: Current workload state with ready replicas.
+        status: Current workload status with ready replicas.
         metric: HPA CPU metric specification.
         idle_cpu_pct: Current CPU usage when idle (baseline).
-        max_cpu_stress_pct_per_pod: Maximum allowable CPU load per pod (default 95%).
+        pod_cpu_stress_threshold_pct: Maximum allowable CPU load per pod (default 95%).
 
     Returns:
         Tuple[pods_to_stress, stress_cpu_percent]
@@ -412,37 +416,50 @@ def calculate_hpa_trigger(
             "Missing 'averageUtilization' or HPA is misconfigured."
         )
 
-    replicas = workload.status.ready_replicas
+    replicas = status.ready_replicas
     total_required_cpu_increase = replicas * (average_utilization - idle_cpu_pct)
 
     # Start with stressing 1 pod
     for pods_to_stress in range(1, replicas + 1):
         stress_percent = idle_cpu_pct + total_required_cpu_increase / pods_to_stress
         stress_percent = math.ceil(stress_percent)
-        if stress_percent <= max_cpu_stress_pct_per_pod:
+        if stress_percent <= pod_cpu_stress_threshold_pct:
             return pods_to_stress, stress_percent
 
     # If even all pods at max stress cannot reach target
-    return replicas, max_cpu_stress_pct_per_pod
+    return replicas, pod_cpu_stress_threshold_pct
+
+
+def get_hpa_current_average_utilization(
+    hpa: V2HorizontalPodAutoscaler,
+) -> Optional[int]:
+    """
+    Extract the average CPU utilization from HPA status metrics (autoscaling/v2).
+    Returns None if not found or not a CPU metric.
+    """
+    for metric in hpa.status.current_metrics or []:
+        if metric.type == HpaMetricSourceEnum.RESOURCE.value and metric.resource:
+            return metric.resource.current.average_utilization
+    return None
 
 
 def raise_on_container_fail(
-    k8s: KubernetesClient, deployment: V1Deployment, namespace: str
+    k8s: KubernetesClient, workload_spec: WorkloadSpec, namespace: str
 ) -> None:
     """
     Check all pods in a deployment for container failures.
 
     Args:
         k8s: Kubernetes client instance used to query pods.
-        deployment: The Kubernetes deployment object to inspect.
+        workload_spec: The Kubernetes workload_spec containing deployment labels.
         namespace: Namespace where the deployment resides.
 
     Raises:
         ContainerCrashedError: If any container is in a crash, waiting with
         abnormal reason, or terminated with an unexpected reason or non-zero exit code.
     """
-    pods: List[V1Pod] = get_deployment_pods(
-        k8s=k8s, deployment=deployment, namespace=namespace, pod_phase=None
+    pods: List[V1Pod] = get_workload_pods(
+        k8s=k8s, workload_spec=workload_spec, namespace=namespace, pod_phase=None
     )
 
     for pod in pods:
@@ -478,16 +495,15 @@ def raise_on_container_fail(
 
 
 def raise_on_hpa_scale(
-    k8s: KubernetesClient, workload_name: str, namespace: str, start_replicas: int
+    k8s: KubernetesClient, namespace: str, workload: WorkloadState
 ) -> Optional[Dict[str, int]]:
     """
     Check if a deployment's ready replicas have increased above the starting count.
 
     Args:
         k8s: Kubernetes client instance.
-        workload_name: Name of the deployment/workload.
+        workload: Workload state.
         namespace: Kubernetes namespace of the deployment.
-        start_replicas: The initial number of ready replicas.
 
     Returns:
         Dict with 'before' and 'after' keys if replicas increased, otherwise None.
@@ -496,17 +512,122 @@ def raise_on_hpa_scale(
         HpaScaledError: If the number of ready replicas exceeds start_replicas.
     """
     deployment = k8s.apps.read_namespaced_deployment(
-        name=workload_name, namespace=namespace
+        name=workload.spec.name, namespace=namespace
     )
+    start_replicas = workload.status.ready_replicas
     current_replicas = deployment.status.ready_replicas or 0
 
     if current_replicas > start_replicas:
+        hpa = k8s.autoscaling.read_namespaced_horizontal_pod_autoscaler(
+            name=workload.spec.hpa.name, namespace=namespace
+        )
         raise HpaScaledError(
             "HPA scaled: replicas increased",
-            context={"before": start_replicas, "after": current_replicas},
+            context={
+                "before_replicas": start_replicas,
+                "after_replicas": current_replicas,
+                "average_utilization": get_hpa_current_average_utilization(hpa=hpa),
+            },
         )
 
     return None
+
+
+def raise_on_desired_replicas(
+    k8s: KubernetesClient,
+    workload_name: str,
+    namespace: str,
+) -> None:
+    """
+    Raise an exception when a Deployment has reached (or exceeded) its desired
+    number of replicas.
+
+    This function is typically used as a guard or exit condition in polling /
+    reconciliation loops that wait for a Kubernetes Deployment to become ready.
+
+    Args:
+        k8s: Initialized Kubernetes client.
+        workload_name: Name of the Deployment to inspect.
+        namespace: Kubernetes namespace containing the Deployment.
+
+    Raises:
+        ReachedDesiredReplicaError: If the number of ready replicas is greater
+            than or equal to the desired replicas specified in the Deployment
+            spec.
+    """
+    deployment = k8s.apps.read_namespaced_deployment(
+        name=workload_name,
+        namespace=namespace,
+    )
+    desired_replicas = deployment.spec.replicas or 0
+    ready_replicas = deployment.status.ready_replicas or 0
+
+    if ready_replicas >= desired_replicas:
+        raise ReachedDesiredReplicaError(
+            "Deployment has reached the desired number of replicas",
+            context={
+                "deployment": workload_name,
+                "namespace": namespace,
+                "ready_replicas": ready_replicas,
+                "desired_replicas": desired_replicas,
+            },
+        )
+
+
+def raise_on_replicas_restored_cpu(
+    k8s: KubernetesClient,
+    namespace: str,
+    stress_context: Dict[Any, Any],
+) -> None:
+    """
+    Raise when a Deployment's replicas have stabilized after HPA scaling.
+
+    Assumes guardrails have already verified:
+      - HPA exists
+      - Deployment is healthy and available
+
+    Args:
+        k8s: Kubernetes client instance.
+        namespace: Namespace of the workload.
+        stress_context: Stress context, e.g., workload state, CPU usage during stress
+
+    Raises:
+        ReplicasRestoredError: If the Deployment replicas are considered restored.
+    """
+    initial_workload_state: WorkloadState = stress_context.get("workload")
+    stress_average_utilization = stress_context.get("average_utilization")
+    max_replicas_on_stress = stress_context.get("after_replicas")
+
+    deployment = k8s.apps.read_namespaced_deployment(
+        name=initial_workload_state.spec.name, namespace=namespace
+    )
+    hpa = k8s.autoscaling.read_namespaced_horizontal_pod_autoscaler(
+        name=initial_workload_state.spec.hpa.name, namespace=namespace
+    )
+
+    current_replicas = deployment.status.ready_replicas or 0
+    desired_replicas = hpa.status.desired_replicas or 0
+    current_average_utilization = get_hpa_current_average_utilization(hpa)
+
+    logger.info(f"Current CPU utilization: {current_average_utilization}")
+
+    if (
+        desired_replicas < max_replicas_on_stress
+        and current_replicas < max_replicas_on_stress
+        and current_average_utilization
+        and current_average_utilization < stress_average_utilization
+    ):
+        raise ReplicasRestoredError(
+            "Workload replicas have stabilized after HPA stress test.",
+            context={
+                "namespace": namespace,
+                "deployment": initial_workload_state.spec.name,
+                "current_replicas": current_replicas,
+                "desired_replicas": desired_replicas,
+                "stress_average_utilization": stress_average_utilization,
+                "current_average_utilization": current_average_utilization,
+            },
+        )
 
 
 def is_node_tolerated(node: V1Node, deployment: V1Deployment) -> bool:

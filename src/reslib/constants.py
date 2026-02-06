@@ -15,8 +15,14 @@ POD_WAITING_REASONS_OK: Tuple = ("PodInitializing", "ContainerCreating")
 
 POD_TERMINATED_REASONS_OK: Tuple = ("Completed", None)
 
+CONTAINER_CRASH_MONITOR_TASK_NAME: str = "monitor:container:crash"
+HPA_SCALE_MONITOR_TASK_NAME: str = "monitor:hpa:scale"
+CPU_STRESS_TASK_NAME_PREFIX: str = "action:stress:pod:cpu"
+REACHED_DESIRED_REPLICA_TASK_NAME: str = "monitor:replicas:desired"
+REPLICAS_RESTORED_TASK_NAME: str = "monitor:replicas:restored"
 
-class HpaMetricTypeEnum(str, Enum):
+
+class HpaMetricSourceEnum(str, Enum):
     RESOURCE = "Resource"
     PODS = "Pods"
     OBJECT = "Object"
@@ -24,16 +30,16 @@ class HpaMetricTypeEnum(str, Enum):
     CONTAINER_RESOURCE = "ContainerResource"
 
 
-class HpaResourceNameEnum(str, Enum):
+class HpaResourceTypeEnum(str, Enum):
     CPU = "cpu"
     MEMORY = "memory"
 
 
-SUPPORTED_HPA_METRIC_TYPES = {
-    HpaMetricTypeEnum.RESOURCE,
+SUPPORTED_HPA_METRIC_SOURCES = {
+    HpaMetricSourceEnum.RESOURCE,
 }
-SUPPORTED_HPA_RESOURCE_NAMES = {
-    HpaResourceNameEnum.CPU,
+SUPPORTED_HPA_RESOURCE_TYPES = {
+    HpaResourceTypeEnum.CPU,
 }
 
 
@@ -71,10 +77,6 @@ class EventEnum(str, Enum):
     ROLLBACK_STARTED: str = "res:reslib:event:rollback:started"
     ROLLBACK_SUCCESS: str = "res:reslib:event:rollback:success"
     ROLLBACK_FAILED: str = "res:reslib:event:rollback:failed"
-
-    # Scale up event
-    HPA_SCALEUP_SUCCESS: str = "res:reslib:event:scale:up:success"
-    HPA_SCALEUP_FAILED: str = "res:reslib:event:scale:up:failed"
 
 
 class MetricsEnum(str, Enum):

@@ -1,6 +1,7 @@
 import asyncio
 import logging
-from typing import List
+import random
+from typing import Dict, List
 
 from kubernetes.client import V1DeleteOptions, V1Pod
 
@@ -9,9 +10,9 @@ from reslib.k8s.client import KubernetesClient
 from reslib.k8s.exceptions import PodDeletionTimeoutError, PodsSelectionError
 from reslib.k8s.schema import WorkloadState
 from reslib.k8s.utils import (
-    get_deployment_pods,
     get_pod_termination_timeout,
     get_workload,
+    get_workload_pods,
     pod_exists,
 )
 from reslib.schemas.pod import PodTerminationArgsTemplate
@@ -62,7 +63,7 @@ def watch_pod_deletion(k8s: KubernetesClient, pod: V1Pod, namespace: str, timeou
     )
 
 
-async def terminate_pods(**kwargs) -> None:
+async def terminate_pods(**kwargs) -> Dict[str, int]:
     """
     Terminate one or more running pods from a workload and wait for their deletion.
 
@@ -103,13 +104,11 @@ async def terminate_pods(**kwargs) -> None:
 
     # 3. List candidate pods
     k8s = KubernetesClient()
-    deployment = k8s.apps.read_namespaced_deployment(
-        name=args.workload,
-        namespace=args.namespace,
-    )
 
-    pods = get_deployment_pods(k8s=k8s, namespace=args.namespace, deployment=deployment)
-    candidate_pods: List[V1Pod] = pods[:pods_to_terminate]
+    pods = get_workload_pods(
+        k8s=k8s, namespace=args.namespace, workload_spec=workload.spec
+    )
+    candidate_pods: List[V1Pod] = random.sample(pods, k=pods_to_terminate)
 
     if not candidate_pods:
         raise PodsSelectionError(
@@ -117,7 +116,9 @@ async def terminate_pods(**kwargs) -> None:
         )
 
     # 4. Terminate pods concurrently
-    timeout: int = get_pod_termination_timeout(candidate_pods)
+    timeout: int = get_pod_termination_timeout(
+        candidate_pods, max_timeout=args.termination_timeout_seconds
+    )
     tasks = [
         watch_pod_deletion(k8s=k8s, pod=pod, namespace=args.namespace, timeout=timeout)
         for pod in candidate_pods
@@ -126,3 +127,4 @@ async def terminate_pods(**kwargs) -> None:
         tasks=tasks, timeout=timeout + 5, return_when=asyncio.FIRST_EXCEPTION
     )
     logger.info("Pod termination successful")
+    return {"terminated_pods": len(candidate_pods)}

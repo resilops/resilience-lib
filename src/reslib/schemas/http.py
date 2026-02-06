@@ -1,7 +1,5 @@
 from pydantic import BaseModel, ConfigDict, Field
 
-from reslib import helpers as h
-
 
 class HTTPLatencyArgsTemplate(BaseModel):
     """
@@ -18,15 +16,11 @@ class HTTPLatencyArgsTemplate(BaseModel):
     endpoint: str = Field(
         ..., description="Full HTTP URL to probe (e.g., http://service/health)."
     )
-    timeout: int = Field(
+    http_request_timeout_seconds: int = Field(
         default=3, ge=0, description="Timeout in seconds for each HTTP request."
     )
     requests_per_interval: int = Field(
         default=3,
         ge=1,
         description="Number of parallel HTTP requests to send per interval.",
-    )
-    telemetry: h.BaseTelemetry = Field(
-        default_factory=h.NoopTelemetry,
-        description="Telemetry recorder to log metrics.",
     )
