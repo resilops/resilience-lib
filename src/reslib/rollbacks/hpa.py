@@ -64,7 +64,7 @@ async def wait_until_hpa_scales_down(**kwargs):
             watch_until(
                 condition=raise_on_container_fail,
                 timeout=args.hpa_scale_down_timeout_seconds,
-                poll_interval=10,
+                poll_interval=5,
                 k8s=k8s,
                 workload_spec=workload.spec,
                 namespace=args.namespace,
@@ -75,7 +75,7 @@ async def wait_until_hpa_scales_down(**kwargs):
             watch_until(
                 condition=raise_on_replicas_restored_cpu,
                 timeout=args.hpa_scale_down_timeout_seconds,
-                poll_interval=10,
+                poll_interval=5,
                 k8s=k8s,
                 namespace=args.namespace,
                 stress_context=get_context("stress_context"),

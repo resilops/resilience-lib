@@ -49,7 +49,7 @@ async def wait_until_pod_respawn(**kwargs) -> dict:
             watch_until(
                 condition=raise_on_desired_replicas,
                 timeout=args.pod_respawn_timeout_seconds,
-                poll_interval=5,
+                poll_interval=3,
                 k8s=k8s,
                 workload_name=args.workload,
                 namespace=args.namespace,
