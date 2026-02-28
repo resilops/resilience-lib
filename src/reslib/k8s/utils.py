@@ -3,7 +3,6 @@ import math
 from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple
 
-from kubernetes import config as k8config
 from kubernetes.client import V1Deployment, V1Node, V1Pod, V2HorizontalPodAutoscaler
 from kubernetes.client.exceptions import ApiException
 
@@ -42,17 +41,6 @@ from reslib.k8s.schema import (
 from reslib.k8s.snapshot import NamespaceSnapshot
 
 logger = logging.getLogger(__name__)
-
-
-def current_cluster_name() -> str:
-    """
-    Get current active cluster name from the config
-
-    Returns:
-        Name of the cluster (string)
-    """
-    _, active_context = k8config.list_kube_config_contexts()
-    return active_context.get("context", {}).get("cluster")
 
 
 def is_deployment_in_progress(deployment: V1Deployment) -> bool:

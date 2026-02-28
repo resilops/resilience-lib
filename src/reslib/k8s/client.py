@@ -1,7 +1,18 @@
-from kubernetes import client
+from kubernetes import client, config as k8config
+from kubernetes.config.config_exception import ConfigException
 
 
 class KubernetesClient:
+
+    def __init__(self) -> None:
+        self._load_config()
+
+    @staticmethod
+    def _load_config() -> None:
+        try:
+            k8config.load_incluster_config()
+        except ConfigException:
+            k8config.load_kube_config()
 
     @property
     def api(self):

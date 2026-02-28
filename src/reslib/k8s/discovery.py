@@ -5,11 +5,11 @@ from kubernetes.client import V1Deployment
 from reslib.k8s.client import KubernetesClient
 from reslib.k8s.schema import (
     ClusterState,
+    NamespaceListConfig,
     NamespaceState,
     WorkloadState,
 )
 from reslib.k8s.utils import (
-    current_cluster_name,
     get_namespace_snapshot,
     get_workload_policies,
     get_workload_spec,
@@ -49,9 +49,9 @@ def discover_workloads(
         )
 
 
-def discover_namespaces(
-    k8s_client: KubernetesClient,
-) -> Generator[NamespaceState, None, None]:
+def discover_cluster(
+    k8s_client: KubernetesClient, cluster_name: str, ns_config: NamespaceListConfig
+) -> ClusterState:
     """
     Discover all namespaces in the cluster and their workloads.
 
@@ -60,40 +60,20 @@ def discover_namespaces(
 
     Args:
         k8s_client: Kubernetes client instance.
+        cluster_name: Cluster name.
+        ns_config: List of namespaces
 
     Yields:
         NamespaceState objects containing workloads for each namespace.
     """
-    namespaces = k8s_client.v1_api.list_namespace().items
+    cluster_state = ClusterState(name=cluster_name)
 
-    for ns in namespaces:
-        ns_state = NamespaceState(
-            name=ns.metadata.name,
-            labels=ns.metadata.labels or {},
-        )
+    for ns in ns_config.namespaces:
+        ns_state = NamespaceState(name=ns.name, title=ns.title)
 
-        for workload in discover_workloads(k8s_client, ns.metadata.name):
+        for workload in discover_workloads(k8s_client, ns.name):
             ns_state.workloads[workload.spec.name] = workload
 
-        yield ns_state
-
-
-def discover_cluster(k8s_client: KubernetesClient) -> ClusterState:
-    """
-    Discover the complete cluster state.
-
-    This is the top-level discovery entrypoint and should be used when a
-    full, consistent snapshot of the cluster is required.
-
-    Args:
-        k8s_client: Kubernetes client instance.
-
-    Returns:
-        ClusterState representing all namespaces and workloads in the cluster.
-    """
-    cluster_state = ClusterState(name=current_cluster_name())
-
-    for ns_state in discover_namespaces(k8s_client):
         cluster_state.namespaces[ns_state.name] = ns_state
 
     return cluster_state

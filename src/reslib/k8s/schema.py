@@ -99,11 +99,16 @@ class WorkloadState(BaseModel):
     status: Optional[WorkloadStatus] = None
 
 
-class NamespaceState(BaseModel):
-    """State of workloads within a namespace."""
+class NamespaceConfig(BaseModel):
+    """Namespace configuration"""
 
     name: str = Field(..., description="Namespace name")
-    labels: Dict[str, str] = Field(default_factory=dict, description="Namespace labels")
+    title: str = Field(..., description="Namespace labels")
+
+
+class NamespaceState(NamespaceConfig):
+    """State of workloads within a namespace."""
+
     workloads: Dict[str, WorkloadState] = Field(
         default_factory=dict, description="Workloads keyed by name"
     )
@@ -112,7 +117,15 @@ class NamespaceState(BaseModel):
 class ClusterState(BaseModel):
     """Snapshot of Kubernetes cluster state."""
 
-    name: str = Field(..., description="Cluster name or identifier")
+    name: str = Field(..., description="Cluster name")
     namespaces: Dict[str, NamespaceState] = Field(
         default_factory=dict, description="Namespaces keyed by name"
+    )
+
+
+class NamespaceListConfig(BaseModel):
+    """Namespace configuration"""
+
+    namespaces: List[NamespaceConfig] = Field(
+        default_factory=list, description="Namespaces keyed by name"
     )
