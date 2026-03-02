@@ -10,8 +10,7 @@ from reslib.core.watchdog import watch_task_group
 from reslib.k8s.client import KubernetesClient
 from reslib.k8s.schema import WorkloadStatus
 from reslib.k8s.utils import get_workload_status
-from reslib.schemas.http import HTTPLatencyArgsTemplate
-from reslib.schemas.telemetry import MetricsPayload
+from reslib.observers.schemas import HTTPLatencyArgsTemplate, MetricsPayload
 
 
 def _emit_metrics(
@@ -27,7 +26,7 @@ def _emit_metrics(
     metrics = MetricsPayload(
         metrics_name=MetricsEnum.HTTP,
         function="measure_endpoint_latency",
-        workload_status=status.model_dump(),
+        workload_status=status.model_dump(mode="json"),
     )
 
     if timed_response:
@@ -58,7 +57,7 @@ async def measure_endpoint_latency(**kwargs) -> None:
     args = HTTPLatencyArgsTemplate(**kwargs)
     k8s = KubernetesClient()
 
-    async with httpx.AsyncClient(timeout=args.http_request_timeout_seconds) as client:
+    async with httpx.AsyncClient(timeout=args.timeout_seconds) as client:
         # 1. Build request coroutines
         tasks = [
             (
@@ -71,7 +70,7 @@ async def measure_endpoint_latency(**kwargs) -> None:
         # 2. Execute all tasks concurrently, do not propagate exceptions except timeout
         completed_tasks = await watch_task_group(
             tasks=tasks,
-            timeout=args.http_request_timeout_seconds * args.requests_per_interval,
+            timeout=args.timeout_seconds * args.requests_per_interval,
             return_when=asyncio.FIRST_EXCEPTION,
             raise_exception=False,
         )

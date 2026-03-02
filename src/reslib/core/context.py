@@ -6,10 +6,10 @@ from typing import Any, Dict, Optional
 
 from reslib import helpers as h
 from reslib.constants import AsyncFunc, EventEnum
-from reslib.exceptions import ScenarioContextError
+from reslib.exceptions import BaseError, ScenarioContextError
+from reslib.observers.schemas import EventPayload
 from reslib.runtime.phases import ExecutionPhase
 from reslib.schemas.scenario import ObserverSpec, ResiliencyScenario
-from reslib.schemas.telemetry import EventPayload
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +114,7 @@ class ObserverContext:
             event=EventPayload(
                 event_name=EventEnum.OBSERVER_STARTED,
                 phase=ExecutionPhase.OBSERVER,
-                observer_name=self.spec.name,
+                data={"observer": self.spec.name},
             )
         )
 
@@ -135,12 +135,16 @@ class ObserverContext:
         # Fail fast if observer, if there are any errors during warmup
         if self._task.done():
             exc = self._task.exception()
+            data = {"observer_name": self.spec.name}
             if exc:
+                if isinstance(exc, BaseError):
+                    data.update({**exc.to_dict()})
                 self.telemetry.emit_event(
                     event=EventPayload(
                         event_name=EventEnum.OBSERVER_FAILED,
                         phase=ExecutionPhase.OBSERVER,
-                        observer_name=self.spec.name,
+                        data=data,
+                        error=exc.__class__.__name__,
                         details=str(exc),
                     )
                 )
@@ -171,7 +175,7 @@ class ObserverContext:
                 event=EventPayload(
                     event_name=EventEnum.OBSERVER_STOPPED,
                     phase=ExecutionPhase.OBSERVER,
-                    observer_name=self.spec.name,
+                    data={"observer": self.spec.name},
                 )
             )
 

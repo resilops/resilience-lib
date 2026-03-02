@@ -1,77 +1,77 @@
-from reslib.exceptions import ExceptionWithContext
+from reslib.exceptions import BaseError
 
 
-class WorkloadNotFound(ExceptionWithContext):
+class WorkloadNotFound(BaseError):
     pass
 
 
-class WorkloadStatusUnavailableError(ExceptionWithContext):
+class WorkloadStatusUnavailableError(BaseError):
     pass
 
 
-class WorkloadReconcilingError(ExceptionWithContext):
+class WorkloadReconcilingError(BaseError):
     pass
 
 
-class WorkloadFaultyError(ExceptionWithContext):
+class WorkloadFaultyError(BaseError):
     pass
 
 
-class WorkloadNotAvailableError(ExceptionWithContext):
+class WorkloadNotAvailableError(BaseError):
     pass
 
 
-class DisruptionExceedMinAvailabilityError(ExceptionWithContext):
+class DisruptionExceedMinAvailabilityError(BaseError):
     pass
 
 
-class PodDeletionTimeoutError(ExceptionWithContext):
+class PodDeletionTimeoutError(BaseError):
     pass
 
 
-class PodsSelectionError(ExceptionWithContext):
+class PodsSelectionError(BaseError):
     pass
 
 
-class WorkloadAtMaxError(ExceptionWithContext):
+class WorkloadAtMaxError(BaseError):
     pass
 
 
-class HpaNotConfiguredError(ExceptionWithContext):
+class HpaNotConfiguredError(BaseError):
     pass
 
 
-class MetricsServerUnavailableError(ExceptionWithContext):
+class MetricsServerUnavailableError(BaseError):
     pass
 
 
-class HpaMetricsNotFoundError(ExceptionWithContext):
+class HpaMetricsNotFoundError(BaseError):
     pass
 
 
-class PodsToStressExceededError(ExceptionWithContext):
+class PodsToStressExceededError(BaseError):
     pass
 
 
-class CPUStressCommandFailed(ExceptionWithContext):
+class CPUStressCommandFailed(BaseError):
     pass
 
 
-class ContainerCrashedError(ExceptionWithContext):
+class ContainerCrashedError(BaseError):
     pass
 
 
-class InsufficientMemoryError(ExceptionWithContext):
+class InsufficientMemoryError(BaseError):
     pass
 
 
-class HpaScaledError(ExceptionWithContext):
+class HpaScaledError(BaseError):
     pass
 
 
-class ReachedDesiredReplicaError(ExceptionWithContext):
+class ReachedDesiredReplicaError(BaseError):
     pass
 
 
-class ReplicasRestoredError(ExceptionWithContext):
+class ReplicasRestoredError(BaseError):
     pass

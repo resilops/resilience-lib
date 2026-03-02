@@ -5,20 +5,7 @@ from pydantic import BaseModel, Field
 from reslib.runtime.phases import ExecutionPhase
 
 
-class BaseSpec(BaseModel):
-    """
-    Base specification for a scenario step with a function name
-    and optional step-specific overrides.
-    """
-
-    name: str = Field(..., description="Name of the callable or function to execute.")
-    overrides: Dict[str, Any] = Field(
-        default_factory=dict,
-        description="Step-specific overrides merged with the scenario template.",
-    )
-
-
-class StepSpec(BaseSpec):
+class StepSpec(BaseModel):
     """
     Represents a single step in a scenario.
 
@@ -29,6 +16,10 @@ class StepSpec(BaseSpec):
     """
 
     type: ExecutionPhase = Field(..., description="Type of the step in the scenario.")
+    name: str = Field(..., description="Name of the callable or function to execute.")
+    kwargs: Dict[str, Any] = Field(
+        default_factory=dict, description="Arguments passed to the callable."
+    )
 
 
 class ObserverConfig(BaseModel):
@@ -70,6 +61,13 @@ class ObserverSpec(BaseModel):
     )
 
 
+class ScenarioTemplate(BaseModel):
+    """Scenario template"""
+
+    namespace: str = Field(..., description="Namespace where the scenario needs to run")
+    workload: str = Field(..., description="Workload of the scenario")
+
+
 class ResiliencyScenario(BaseModel):
     """
     Full scenario definition including:
@@ -79,9 +77,9 @@ class ResiliencyScenario(BaseModel):
     - `observer`: monitoring configuration
     """
 
-    template: Dict[str, Any] = Field(
-        default_factory=dict,
-        description="Scenario-specific template fields merged into all steps.",
+    template: ScenarioTemplate = Field(
+        ...,
+        description="Scenario-specific template fields.",
     )
     steps: List[StepSpec] = Field(
         ..., description="Ordered list of steps (guardrail/action/rollback)."

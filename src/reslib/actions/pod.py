@@ -5,17 +5,17 @@ from typing import Dict, List
 
 from kubernetes.client import V1DeleteOptions, V1Pod
 
+from reslib.actions.schemas import PodTerminationSchema
+from reslib.core.context import get_context
 from reslib.core.watchdog import watch_task_group, watch_until
 from reslib.k8s.client import KubernetesClient
 from reslib.k8s.exceptions import PodDeletionTimeoutError, PodsSelectionError
 from reslib.k8s.schema import WorkloadState
 from reslib.k8s.utils import (
     get_pod_termination_timeout,
-    get_workload,
     get_workload_pods,
     pod_exists,
 )
-from reslib.schemas.pod import PodTerminationArgsTemplate
 from reslib.schemas.validators import QuantitySelection
 
 logger = logging.getLogger(__name__)
@@ -55,15 +55,31 @@ def watch_pod_deletion(k8s: KubernetesClient, pod: V1Pod, namespace: str, timeou
             pod_name=pod.metadata.name,
             k8s=k8s,
             timeout_exception=PodDeletionTimeoutError(
-                "Timed out waiting for pods to be deleted in "
-                f"namespace '{namespace}'"
+                error_code="POD_DELETION_TIMEOUT",
+                message="Pod was not deleted within the allowed timeout.",
+                context={
+                    "rule": "pod no longer exists before timeout",
+                    "inputs": {
+                        "pod_name": pod.metadata.name,
+                        "namespace": namespace,
+                        "timeout_seconds": timeout,
+                    },
+                    "observed": {
+                        "deletion_requested": True,
+                    },
+                },
+                fix_hint=(
+                    "Check pod finalizers, termination grace period, "
+                    "or node health preventing deletion."
+                ),
+                retryable=True,
             ),
         ),
         f"delete:pod:{pod.metadata.name}",
     )
 
 
-async def terminate_pods(**kwargs) -> Dict[str, int]:
+async def terminate_pods(**kwargs) -> Dict:
     """
     Terminate one or more running pods from a workload and wait for their deletion.
 
@@ -86,10 +102,11 @@ async def terminate_pods(**kwargs) -> Dict[str, int]:
     """
     logger.info("Starting pod termination")
     # Validate and normalize input arguments
-    args = PodTerminationArgsTemplate(**kwargs)
+    args = PodTerminationSchema(**kwargs)
 
     # 1. Discover workload
-    workload: WorkloadState = get_workload(namespace=args.namespace, name=args.workload)
+    workload: WorkloadState = get_context("workload")
+    namespace: str = get_context("namespace")
 
     # 2. Determine pods to terminate
     selection = QuantitySelection(mode=args.mode, amount=args.quantity)
@@ -99,32 +116,76 @@ async def terminate_pods(**kwargs) -> Dict[str, int]:
 
     if pods_to_terminate <= 0:
         raise PodsSelectionError(
-            "No pods selected for termination", context={"pods": pods_to_terminate}
+            error_code="NO_PODS_SELECTED_FOR_TERMINATION",
+            message="Resolved pod termination count is zero; nothing to terminate.",
+            context={
+                "rule": "pods_to_terminate >= 1",
+                "inputs": {
+                    "mode": args.mode.value,
+                    "quantity": args.quantity,
+                    "ready_replicas": workload.status.ready_replicas,
+                },
+                "observed": {
+                    "pods_to_terminate": pods_to_terminate,
+                },
+            },
+            fix_hint=(
+                "Increase `quantity` (or percentage) or ensure "
+                "the workload has ready replicas."
+            ),
+            retryable=False,
         )
 
     # 3. List candidate pods
     k8s = KubernetesClient()
 
-    pods = get_workload_pods(
-        k8s=k8s, namespace=args.namespace, workload_spec=workload.spec
-    )
+    pods = get_workload_pods(k8s=k8s, namespace=namespace, workload_spec=workload.spec)
     candidate_pods: List[V1Pod] = random.sample(pods, k=pods_to_terminate)
 
     if not candidate_pods:
         raise PodsSelectionError(
-            "No running pods found to terminate", context={"pods": len(candidate_pods)}
+            error_code="NO_CANDIDATE_PODS_FOUND",
+            message="No eligible running pods were found for termination.",
+            context={
+                "rule": "at least one candidate pod must be available for termination",
+                "inputs": {
+                    "namespace": namespace,
+                    "workload": workload.spec.name,
+                    "requested_terminations": pods_to_terminate,
+                },
+                "observed": {
+                    "total_pods_found": len(pods),
+                    "candidate_pods_selected": len(candidate_pods),
+                },
+            },
+            fix_hint=(
+                "Ensure the workload has running pods and the label selector matches. "
+                "If the workload is scaling down or restarting, retry after "
+                "it stabilizes."
+            ),
+            retryable=True,
         )
 
     # 4. Terminate pods concurrently
     timeout: int = get_pod_termination_timeout(
-        candidate_pods, max_timeout=args.termination_timeout_seconds
+        candidate_pods, max_timeout=args.timeout_seconds
     )
     tasks = [
-        watch_pod_deletion(k8s=k8s, pod=pod, namespace=args.namespace, timeout=timeout)
+        watch_pod_deletion(k8s=k8s, pod=pod, namespace=namespace, timeout=timeout)
         for pod in candidate_pods
     ]
     await watch_task_group(
         tasks=tasks, timeout=timeout + 5, return_when=asyncio.FIRST_EXCEPTION
     )
     logger.info("Pod termination successful")
-    return {"terminated_pods": len(candidate_pods)}
+    return {
+        "result": "pods_terminated",
+        "reason": (
+            "Selected workload pods were successfully terminated and confirmed deleted."
+        ),
+        "observed": {
+            "requested_terminations": pods_to_terminate,
+            "terminated_pods": len(candidate_pods),
+            "termination_timeout_seconds": timeout,
+        },
+    }

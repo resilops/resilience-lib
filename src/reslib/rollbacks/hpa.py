@@ -12,11 +12,10 @@ from reslib.k8s.client import KubernetesClient
 from reslib.k8s.exceptions import ReplicasRestoredError
 from reslib.k8s.schema import WorkloadState
 from reslib.k8s.utils import (
-    get_workload,
     raise_on_container_fail,
     raise_on_replicas_restored_cpu,
 )
-from reslib.schemas.hpa import HpaCPUStressArgsTemplate
+from reslib.rollbacks.schemas import HpaScaleDownSchema
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +42,7 @@ async def wait_until_hpa_scales_down(**kwargs):
         **kwargs: Keyword arguments matching template, which must include:
                 - workload (str): Deployment name
                 - namespace (str): Kubernetes namespace
-                - hpa_scale_down_timeout_seconds (int): Maximum wait for HPA downscale
+                - timeout_seconds (int): Maximum wait for HPA downscale
 
     Returns:
         Dict[str, Any]: Context returned by `raise_on_replicas_restored_cpu` when
@@ -54,30 +53,30 @@ async def wait_until_hpa_scales_down(**kwargs):
         Any other exception (container crash, timeout, API error) will propagate
         to the calling execution phase.
     """
-
-    args = HpaCPUStressArgsTemplate(**kwargs)
+    args = HpaScaleDownSchema(**kwargs)
     k8s = KubernetesClient()
-    workload: WorkloadState = get_workload(namespace=args.namespace, name=args.workload)
+    workload: WorkloadState = get_context("workload")
+    namespace: str = get_context("namespace")
 
     tasks: List[Tuple[Awaitable[Any], str]] = [
         (
             watch_until(
                 condition=raise_on_container_fail,
-                timeout=args.hpa_scale_down_timeout_seconds,
+                timeout=args.timeout_seconds,
                 poll_interval=5,
                 k8s=k8s,
                 workload_spec=workload.spec,
-                namespace=args.namespace,
+                namespace=namespace,
             ),
             CONTAINER_CRASH_MONITOR_TASK_NAME,
         ),
         (
             watch_until(
                 condition=raise_on_replicas_restored_cpu,
-                timeout=args.hpa_scale_down_timeout_seconds,
+                timeout=args.timeout_seconds,
                 poll_interval=5,
                 k8s=k8s,
-                namespace=args.namespace,
+                namespace=namespace,
                 stress_context=get_context("stress_context"),
             ),
             REPLICAS_RESTORED_TASK_NAME,
@@ -87,9 +86,17 @@ async def wait_until_hpa_scales_down(**kwargs):
     try:
         await watch_task_group(
             tasks=tasks,
-            timeout=args.hpa_scale_down_timeout_seconds + 10,
+            timeout=args.timeout_seconds + 10,
             return_when=asyncio.FIRST_EXCEPTION,
         )
     except ReplicasRestoredError as exc:
         logger.info("Replicas restored. Rollback success")
-        return exc.context
+        return {
+            "result": "hpa_scale_down_stabilized",
+            "status": "success",
+            "reason": (
+                "Workload replicas and CPU utilization stabilized after "
+                "HPA scale-up caused by CPU stress."
+            ),
+            "observed": exc.context.get("observed", {}),
+        }

@@ -2,6 +2,8 @@ import asyncio
 import time
 from typing import Any, Awaitable, Callable, List, Optional, Tuple
 
+from reslib.exceptions import TaskGroupTimeoutError, TaskTimeoutError
+
 
 async def watch_task_group(
     tasks: List[Tuple[Awaitable[Any], str]],
@@ -48,12 +50,30 @@ async def watch_task_group(
     for task in pending:
         task.cancel()
 
+    await asyncio.gather(*pending, return_exceptions=True)
+
     # Raise first exception if requested
     if raise_exception:
         for task in done:
             exc = task.exception()
             if exc:
                 raise exc
+
+    if pending:
+        TaskGroupTimeoutError(
+            error_code="TASK_GROUP_TIMEOUT",
+            message="Task group execution exceeded allowed timeout.",
+            context={
+                "rule": "all required tasks complete before timeout",
+                "observed": {
+                    "timeout_seconds": timeout,
+                    "completed_tasks": [t.get_name() for t in done],
+                    "pending_tasks": [t.get_name() for t in pending],
+                },
+            },
+            fix_hint=("Increase timeout or investigate long-running or blocked tasks."),
+            retryable=False,
+        )
 
     return list(done)
 
@@ -85,8 +105,22 @@ async def watch_until(
         timeout_exception if timeout occurs, default is TimeoutError.
     """
     deadline = time.monotonic() + timeout
-    timeout_exception = timeout_exception or TimeoutError(
-        f"watch_until timed out after {timeout}s for condition: {condition.__name__}"
+    timeout_exception = timeout_exception or TaskTimeoutError(
+        error_code="WATCH_CONDITION_TIMEOUT",
+        message="Condition was not satisfied within the allowed timeout.",
+        context={
+            "rule": "condition evaluates to truthy before timeout",
+            "inputs": {
+                "condition": repr(condition),
+                "timeout_seconds": timeout,
+                "poll_interval_seconds": poll_interval,
+            },
+        },
+        fix_hint=(
+            "Increase timeout, reduce system load, or verify that the "
+            "observed system state can reach the expected condition."
+        ),
+        retryable=False,
     )
 
     while True:
