@@ -35,7 +35,7 @@ def discover_workloads(
     Yields:
         WorkloadState objects representing each discovered Deployment.
     """
-    snapshot = get_namespace_snapshot(namespace=namespace)
+    snapshot = get_namespace_snapshot(k8s=k8s_client, namespace=namespace)
 
     deployments: list[V1Deployment] = k8s_client.apps.list_namespaced_deployment(
         namespace=namespace

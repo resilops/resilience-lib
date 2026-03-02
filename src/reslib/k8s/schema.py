@@ -6,6 +6,34 @@ from pydantic import BaseModel, Field
 from reslib.constants import HpaMetricSourceEnum, K8DeploymentKind
 
 
+class ResourceRequirements(BaseModel):
+    """
+    Kubernetes-like resource requirements.
+    Values are strings because K8s quantities are strings: "250m", "1", "128Mi",
+    "1Gi", etc.
+    """
+
+    requests: Dict[str, Any] = Field(default_factory=dict)
+    limits: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ContainerSpec(BaseModel):
+    """Container specifications."""
+
+    name: str
+    resources: Optional[ResourceRequirements] = None
+
+
+class K8Condition(BaseModel):
+    """Kubernetes condition model."""
+
+    type: str
+    status: str
+    reason: Optional[str] = None
+    message: Optional[str] = None
+    last_transition_time: Optional[datetime] = None
+
+
 class HPAMetricSpec(BaseModel):
     """Horizontal Pod Autoscaler metrics."""
 
@@ -48,6 +76,9 @@ class WorkloadSpec(BaseModel):
         default_factory=dict,
         description="Pod labels to select pods belonging to this workload",
     )
+    containers: List[Optional[ContainerSpec]] = Field(
+        default_factory=list, description="Pod containers"
+    )
 
 
 class WorkloadPolicies(BaseModel):
@@ -86,8 +117,8 @@ class WorkloadStatus(BaseModel):
             "Generation of the workload spec currently applied by the controller"
         ),
     )
-    last_transition_time: Optional[datetime] = Field(
-        default=None, description="Last time the workload status changed"
+    conditions: List[Optional[K8Condition]] = Field(
+        default_factory=list, description="Workload conditions"
     )
 
 

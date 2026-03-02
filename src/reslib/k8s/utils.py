@@ -30,9 +30,12 @@ from reslib.k8s.exceptions import (
     WorkloadNotFound,
 )
 from reslib.k8s.schema import (
+    ContainerSpec,
     HPAConfig,
     HPAMetricSpec,
+    K8Condition,
     PDBConfig,
+    ResourceRequirements,
     WorkloadPolicies,
     WorkloadSpec,
     WorkloadState,
@@ -41,6 +44,37 @@ from reslib.k8s.schema import (
 from reslib.k8s.snapshot import NamespaceSnapshot
 
 logger = logging.getLogger(__name__)
+
+
+def get_deployment_conditions(deployment: V1Deployment) -> List[Optional[K8Condition]]:
+    """
+    Convert Kubernetes Deployment status conditions into a JSON-friendly model.
+
+    Kubernetes exposes rollout/availability information on a Deployment via
+    `deployment.status.conditions`, where each condition is a Kubernetes client
+    object (e.g. V1DeploymentCondition). This helper extracts the relevant
+    fields and returns them as a list of `K8Condition` models that are safe to
+    store, serialize, and consume in APIs/UI/AI analysis.
+
+    Args:
+        deployment: Kubernetes `V1Deployment` object.
+
+    Returns:
+        List of `K8Condition` objects. If the Deployment has no conditions,
+        returns an empty list.
+    """
+    conditions: List[Optional[K8Condition]] = []
+    for c in deployment.status.conditions or []:
+        conditions.append(
+            K8Condition(
+                type=c.type,
+                status=c.status,
+                reason=getattr(c, "reason", None),
+                message=getattr(c, "message", None),
+                last_transition_time=getattr(c, "last_transition_time", None),
+            )
+        )
+    return conditions
 
 
 def is_deployment_in_progress(deployment: V1Deployment) -> bool:
@@ -118,7 +152,7 @@ def is_deployment_faulty(deployment: V1Deployment) -> bool:
 
 
 @lru_cache(maxsize=64)
-def get_namespace_snapshot(namespace: str) -> NamespaceSnapshot:
+def get_namespace_snapshot(k8s: KubernetesClient, namespace: str) -> NamespaceSnapshot:
     """
     Build and cache a snapshot of namespace-scoped workload policies.
 
@@ -133,13 +167,13 @@ def get_namespace_snapshot(namespace: str) -> NamespaceSnapshot:
     repeated API calls. The cache can store up to 64 namespaces.
 
     Args:
-        namespace: The Kubernetes namespace to snapshot.
+        k8s: KubernetesClient object.
+        namespace: The Kubernetes namespace to take a snapshot.
 
     Returns:
         NamespaceSnapshot: Immutable object containing the HPAs and PDBs
         for the namespace.
     """
-    k8s = KubernetesClient()
     hpas = k8s.autoscaling.list_namespaced_horizontal_pod_autoscaler(
         namespace=namespace
     ).items
@@ -154,15 +188,32 @@ def get_workload_spec(
     snapshot: NamespaceSnapshot, deployment: V1Deployment
 ) -> WorkloadSpec:
     """
-    Build a WorkloadSpec from a Deployment and HPA index.
+    Build a WorkloadSpec from a Deployment, HPA index and get container resource/limits.
 
     Used during bulk discovery.
     """
     hpa = snapshot.get_hpa(deployment)
+    containers: list[ContainerSpec] = []
+    pod_spec = deployment.spec.template.spec
+
+    for container in pod_spec.containers or []:
+        res = getattr(container, "resources", None)
+        requests = getattr(res, "requests", None)
+        limits = getattr(res, "limits", None)
+        containers.append(
+            ContainerSpec(
+                name=container.name,
+                resources=(
+                    ResourceRequirements(requests=requests, limits=limits)
+                    if res
+                    else None
+                ),
+            )
+        )
 
     return WorkloadSpec(
         name=deployment.metadata.name,
-        kind=K8DeploymentKind.DEPLOYMENT.value,
+        kind=K8DeploymentKind.DEPLOYMENT,
         replicas=deployment.spec.replicas or 0,
         hpa=(
             HPAConfig(
@@ -178,6 +229,7 @@ def get_workload_spec(
             else None
         ),
         labels=deployment.spec.selector.match_labels or {},
+        containers=containers,
     )
 
 
@@ -212,6 +264,7 @@ def get_workload_status(deployment: V1Deployment) -> WorkloadStatus:
         is_faulty=is_deployment_faulty(deployment),
         spec_generation=deployment.metadata.generation,
         spec_applied_generation=deployment.status.observed_generation,
+        conditions=get_deployment_conditions(deployment),
     )
 
 
@@ -239,7 +292,7 @@ def get_workload(
         WorkloadNotFound: If the Deployment does not exist.
     """
     k8s = k8s or KubernetesClient()
-    snapshot = get_namespace_snapshot(namespace=namespace)
+    snapshot = get_namespace_snapshot(k8s=k8s, namespace=namespace)
 
     try:
         deployment = k8s.apps.read_namespaced_deployment(
@@ -494,7 +547,8 @@ def raise_on_hpa_scale(
         namespace: Kubernetes namespace of the deployment.
 
     Returns:
-        Dict with 'before' and 'after' keys if replicas increased, otherwise None.
+        Dict with 'before' state and 'after' state keys if replicas increased,
+        otherwise None.
 
     Raises:
         HpaScaledError: If the number of ready replicas exceeds start_replicas.
