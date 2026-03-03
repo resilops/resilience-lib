@@ -1,6 +1,9 @@
 from reslib.core.context import get_context
-from reslib.guardrails.schema import PDBDisruptionBudgetSchema
-from reslib.k8s.exceptions import DisruptionExceedMinAvailabilityError
+from reslib.guardrails.schemas import PDBConfigurationAllowMissing
+from reslib.k8s.exceptions import (
+    DisruptionExceedMinAvailabilityError,
+    PdbNotConfiguredError,
+)
 from reslib.k8s.schema import WorkloadState
 
 
@@ -20,8 +23,37 @@ def ensure_pdb_not_violated(**kwargs) -> None:
             if required context is missing.
     """
     workload: WorkloadState = get_context("workload")
-    args = PDBDisruptionBudgetSchema(**kwargs)
-    if args.respect_pdb and workload.policies and not workload.policies.pdb:
+    args = PDBConfigurationAllowMissing(**kwargs)
+
+    pdb_config_exists: bool = workload.policies and workload.policies.pdb is not None
+
+    if not args.allow_missing_pdb and not pdb_config_exists:
+        raise PdbNotConfiguredError(
+            error_code="PDB_NOT_CONFIGURED",
+            message=("PodDisruptionBudget is not configured for the target workload."),
+            context={
+                "rule": "pdb must exist unless allow_missing_pdb is true",
+                "inputs": {
+                    "allow_missing_pdb": args.allow_missing_pdb,
+                },
+                "observed": {
+                    "namespace": workload.spec.name,
+                    "workload": workload.spec.name,
+                    "pdb_present": False,
+                },
+                "required": {
+                    "pdb_present": True,
+                },
+            },
+            fix_hint=(
+                "Create a PodDisruptionBudget for this workload to enforce "
+                "minimum availability during voluntary disruptions, "
+                "or set `allow_missing_pdb=true` to explicitly bypass this guardrail."
+            ),
+            retryable=False,
+        )
+
+    if not pdb_config_exists:
         return
 
     disruption_budget = get_context("pod_termination_count")
@@ -43,7 +75,6 @@ def ensure_pdb_not_violated(**kwargs) -> None:
             context={
                 "rule": "remaining_ready_replicas >= pdb.min_available",
                 "inputs": {
-                    "respect_pdb": args.respect_pdb,
                     "pod_termination_count": disruption_budget,
                 },
                 "observed": {

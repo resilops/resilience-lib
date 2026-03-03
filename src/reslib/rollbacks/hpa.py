@@ -16,6 +16,7 @@ from reslib.k8s.utils import (
     raise_on_replicas_restored_cpu,
 )
 from reslib.rollbacks.schemas import HpaScaleDownSchema
+from reslib.schemas.scenario import ResiliencyScenario
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +57,8 @@ async def wait_until_hpa_scales_down(**kwargs):
     args = HpaScaleDownSchema(**kwargs)
     k8s = KubernetesClient()
     workload: WorkloadState = get_context("workload")
-    namespace: str = get_context("namespace")
+    scenario: ResiliencyScenario = get_context("scenario")
+    namespace: str = scenario.template.namespace
 
     tasks: List[Tuple[Awaitable[Any], str]] = [
         (

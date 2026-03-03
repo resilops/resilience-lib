@@ -16,6 +16,7 @@ from reslib.k8s.utils import (
     get_workload_pods,
     pod_exists,
 )
+from reslib.schemas.scenario import ResiliencyScenario
 from reslib.schemas.validators import QuantitySelection
 
 logger = logging.getLogger(__name__)
@@ -101,15 +102,17 @@ async def terminate_pods(**kwargs) -> Dict:
         PodDeletionTimeoutError: If pod deletion does not complete within the timeout.
     """
     logger.info("Starting pod termination")
-    # Validate and normalize input arguments
     args = PodTerminationSchema(**kwargs)
 
     # 1. Discover workload
     workload: WorkloadState = get_context("workload")
-    namespace: str = get_context("namespace")
+    scenario: ResiliencyScenario = get_context("scenario")
+    namespace: str = scenario.template.namespace
 
     # 2. Determine pods to terminate
-    selection = QuantitySelection(mode=args.mode, amount=args.quantity)
+    selection = QuantitySelection(
+        mode=scenario.template.mode, amount=scenario.template.quantity
+    )
     pods_to_terminate = selection.with_total(workload.status.ready_replicas)
 
     logger.info(f"Total pods to terminate is: {pods_to_terminate}")
@@ -121,8 +124,8 @@ async def terminate_pods(**kwargs) -> Dict:
             context={
                 "rule": "pods_to_terminate >= 1",
                 "inputs": {
-                    "mode": args.mode.value,
-                    "quantity": args.quantity,
+                    "mode": scenario.template.mode.value,
+                    "quantity": scenario.template.quantity,
                     "ready_replicas": workload.status.ready_replicas,
                 },
                 "observed": {

@@ -134,7 +134,6 @@ async def execute_resilience_scenario(
     async with ScenarioContext(
         scenario=scenario,
         telemetry=telemetry or h.NoopTelemetry(),
-        namespace=scenario.template.namespace,
         workload=workload,
     ):
         # 1. Guardrail phase (fatal if validation fails)

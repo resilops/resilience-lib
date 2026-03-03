@@ -5,7 +5,6 @@ from typing import Optional
 from reslib.constants import SUPPORTED_HPA_METRIC_SOURCES, SUPPORTED_HPA_RESOURCE_TYPES
 from reslib.core.context import get_context
 from reslib.exceptions import NotSupportedError
-from reslib.guardrails.schema import HPAResourceMetricSchema, PodStressSchema
 from reslib.k8s.exceptions import (
     HpaMetricsNotFoundError,
     HpaNotConfiguredError,
@@ -17,11 +16,12 @@ from reslib.k8s.utils import (
     calculate_hpa_trigger,
     get_hpa_resource_metric,
 )
+from reslib.schemas.scenario import ResiliencyScenario
 
 logger = logging.getLogger(__name__)
 
 
-def validate_metric_and_resource(**kwargs) -> None:
+def validate_metric_and_resource() -> None:
     """
     Validate that the requested HPA metric source and resource type are supported.
 
@@ -32,20 +32,20 @@ def validate_metric_and_resource(**kwargs) -> None:
         BaseError:
             If the metric source or resource type is not in the supported sets.
     """
-    args = HPAResourceMetricSchema(**kwargs)
+    scenario: ResiliencyScenario = get_context("scenario")
 
-    if args.metric_source not in SUPPORTED_HPA_METRIC_SOURCES:
+    if scenario.template.metric_source not in SUPPORTED_HPA_METRIC_SOURCES:
         raise NotSupportedError(
             error_code="HPA_METRIC_SOURCE_NOT_SUPPORTED",
             message="Requested HPA metric source is not supported for scaling tests.",
             context={
                 "rule": "metric_source in SUPPORTED_HPA_METRIC_SOURCES",
                 "inputs": {
-                    "metric_source": args.metric_source.value,
-                    "resource_type": args.resource_type.value,
+                    "metric_source": scenario.template.metric_source.value,
+                    "resource_type": scenario.template.resource_type.value,
                 },
                 "observed": {
-                    "metric_source": args.metric_source.value,
+                    "metric_source": scenario.template.metric_source.value,
                     "supported_metric_sources": [
                         m.value for m in SUPPORTED_HPA_METRIC_SOURCES
                     ],
@@ -58,18 +58,18 @@ def validate_metric_and_resource(**kwargs) -> None:
             retryable=False,
         )
 
-    if args.resource_type not in SUPPORTED_HPA_RESOURCE_TYPES:
+    if scenario.template.resource_type not in SUPPORTED_HPA_RESOURCE_TYPES:
         raise NotSupportedError(
             error_code="HPA_RESOURCE_TYPE_NOT_SUPPORTED",
             message="Requested HPA resource type is not supported for scaling tests.",
             context={
                 "rule": "resource_type in SUPPORTED_HPA_RESOURCE_TYPES",
                 "inputs": {
-                    "metric_source": args.metric_source.value,
-                    "resource_type": args.resource_type.value,
+                    "metric_source": scenario.template.metric_source.value,
+                    "resource_type": scenario.template.resource_type.value,
                 },
                 "observed": {
-                    "resource_type": args.resource_type.value,
+                    "resource_type": scenario.template.resource_type.value,
                     "supported_resource_types": [
                         r.value for r in SUPPORTED_HPA_RESOURCE_TYPES
                     ],
@@ -83,18 +83,12 @@ def validate_metric_and_resource(**kwargs) -> None:
         )
 
 
-def validate_hpa_resource_metric(**kwargs) -> HPAMetricSpec:
+def validate_hpa_resource_metric() -> HPAMetricSpec:
     """
     Validate that the workload HPA defines the requested metric and resource type.
 
     This function parses `HPAResourceMetricSchema` from kwargs, then searches the
     workload's HPA spec for a matching resource metric (e.g., CPU or memory).
-
-    Args:
-        **kwargs:
-            Parameters used to construct ``HPAResourceMetricSchema``:
-            - metric_source
-            - resource_type
 
     Returns:
         HPAMetricSpec:
@@ -106,11 +100,12 @@ def validate_hpa_resource_metric(**kwargs) -> HPAMetricSpec:
             metric/resource type is not present in the HPA spec.
     """
     workload: WorkloadState = get_context("workload")
-    args = HPAResourceMetricSchema(**kwargs)
+    scenario: ResiliencyScenario = get_context("scenario")
+
     hpa_metric: Optional[HPAMetricSpec] = get_hpa_resource_metric(
         hpa=workload.spec.hpa,
-        metric_source=args.metric_source,
-        resource_type=args.resource_type,
+        metric_source=scenario.template.metric_source,
+        resource_type=scenario.template.resource_type,
     )
 
     if hpa_metric is None:
@@ -120,8 +115,8 @@ def validate_hpa_resource_metric(**kwargs) -> HPAMetricSpec:
             context={
                 "rule": "HPA defines a metric matching (metric_source, resource_type)",
                 "inputs": {
-                    "metric_source": args.metric_source.value,
-                    "resource_type": args.resource_type.value,
+                    "metric_source": scenario.template.metric_source.value,
+                    "resource_type": scenario.template.resource_type.value,
                 },
                 "observed": {
                     "match_found": False,
@@ -166,7 +161,7 @@ def ensure_hpa_exists() -> HPAConfig:
     return workload.spec.hpa
 
 
-def ensure_not_at_max_replicas() -> None:
+def ensure_hpa_not_at_max_replicas() -> None:
     """
     Validate that the workload is not already at the HPA maximum replicas.
 
@@ -209,7 +204,7 @@ def ensure_not_at_max_replicas() -> None:
         )
 
 
-def validate_pods_to_stress_cpu(**kwargs) -> int:
+def validate_pods_to_stress_cpu() -> int:
     """
     Validate that the computed number of pods to stress stays within
     the configured safety limits.
@@ -217,12 +212,6 @@ def validate_pods_to_stress_cpu(**kwargs) -> int:
     This guardrail uses HPA metrics and CPU thresholds to determine how
     many pods should be stressed, then ensures that enough pods remain
     idle based on the configured minimum idle percentage.
-
-    Args:
-        **kwargs:
-            Parameters used to construct ``PodStressSchema``: metric source,
-            resource type, idle CPU threshold, pod CPU stress threshold,
-            and minimum idle pod percentage.
 
     Returns:
         The number of pods to stress based on HPA metrics and thresholds.
@@ -234,22 +223,23 @@ def validate_pods_to_stress_cpu(**kwargs) -> int:
     """
 
     workload: WorkloadState = get_context("workload")
-    args = PodStressSchema(**kwargs)
+    scenario: ResiliencyScenario = get_context("scenario")
+
     hpa_metric = get_hpa_resource_metric(
         hpa=workload.spec.hpa,
-        metric_source=args.metric_source,
-        resource_type=args.resource_type,
+        metric_source=scenario.template.metric_source,
+        resource_type=scenario.template.resource_type,
     )
 
     pods_to_stress, _ = calculate_hpa_trigger(
         status=workload.status,
         metric=hpa_metric,
-        idle_cpu_pct=args.idle_cpu_pct,
-        cpu_stress_threshold_pct=args.cpu_stress_threshold_pct,
+        idle_cpu_pct=scenario.template.idle_cpu_pct,
+        cpu_stress_threshold_pct=scenario.template.cpu_stress_threshold_pct,
     )
 
     min_idle_pods_count = math.ceil(
-        workload.status.ready_replicas * args.min_idle_pct / 100
+        workload.status.ready_replicas * scenario.template.min_idle_pct / 100
     )
     max_pods_can_stress = workload.status.ready_replicas - min_idle_pods_count
 
@@ -258,13 +248,15 @@ def validate_pods_to_stress_cpu(**kwargs) -> int:
             error_code="PODS_TO_STRESS_EXCEEDS_IDLE_SAFETY_LIMIT",
             message="Calculated number of pods to stress exceeds allowed safety limit.",
             context={
-                "rule": ("pods_to_stress <= " "ready_replicas - required_idle_pods"),
+                "rule": "pods_to_stress <= " "ready_replicas - required_idle_pods",
                 "inputs": {
-                    "idle_cpu_pct": args.idle_cpu_pct,
-                    "cpu_stress_threshold_pct": args.cpu_stress_threshold_pct,
-                    "min_idle_pct": args.min_idle_pct,
-                    "metric_source": args.metric_source.value,
-                    "resource_type": args.resource_type.value,
+                    "idle_cpu_pct": scenario.template.idle_cpu_pct,
+                    "cpu_stress_threshold_pct": (
+                        scenario.template.cpu_stress_threshold_pct
+                    ),
+                    "min_idle_pct": scenario.template.min_idle_pct,
+                    "metric_source": scenario.template.metric_source.value,
+                    "resource_type": scenario.template.resource_type.value,
                 },
                 "observed": {
                     "ready_replicas": workload.status.ready_replicas,

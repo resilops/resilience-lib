@@ -5,6 +5,7 @@ from reslib.k8s.client import KubernetesClient
 from reslib.k8s.exceptions import MetricsServerUnavailableError
 from reslib.k8s.schema import WorkloadState
 from reslib.k8s.utils import get_workload_pods
+from reslib.schemas.scenario import ResiliencyScenario
 
 
 def ensure_metrics_server_available() -> None:
@@ -25,8 +26,10 @@ def ensure_metrics_server_available() -> None:
     """
 
     workload: WorkloadState = get_context("workload")
+    scenario: ResiliencyScenario = get_context("scenario")
+    namespace: str = scenario.template.namespace
+
     k8s = KubernetesClient()
-    namespace = get_context("namespace")
     pods = get_workload_pods(k8s=k8s, namespace=namespace, workload_spec=workload.spec)
     pod_name = pods[0].metadata.name
 

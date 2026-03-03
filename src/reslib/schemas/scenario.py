@@ -1,8 +1,13 @@
 from typing import Any, Dict, List
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from reslib.runtime.phases import ExecutionPhase
+from reslib.schemas.templates import (
+    SCENARIO_TEMPLATES_MAPPING,
+    HPAScaleStressCPUScenarioTemplate,
+    PodKillScenarioTemplate,
+)
 
 
 class StepSpec(BaseModel):
@@ -61,13 +66,6 @@ class ObserverSpec(BaseModel):
     )
 
 
-class ScenarioTemplate(BaseModel):
-    """Scenario template"""
-
-    namespace: str = Field(..., description="Namespace where the scenario needs to run")
-    workload: str = Field(..., description="Workload of the scenario")
-
-
 class ResiliencyScenario(BaseModel):
     """
     Full scenario definition including:
@@ -77,7 +75,10 @@ class ResiliencyScenario(BaseModel):
     - `observer`: monitoring configuration
     """
 
-    template: ScenarioTemplate = Field(
+    name: str = Field(..., description="Name of the scenario template.")
+    title: str = Field(..., description="Title of the scenario template.")
+    description: str = Field(..., description="Description of the scenario template.")
+    template: PodKillScenarioTemplate | HPAScaleStressCPUScenarioTemplate = Field(
         ...,
         description="Scenario-specific template fields.",
     )
@@ -87,3 +88,36 @@ class ResiliencyScenario(BaseModel):
     observer: ObserverSpec = Field(
         ..., description="Observer configuration to monitor system behavior."
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def validate_and_cast_template(cls, values: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Dynamically select and validate the scenario template model based on `name`.
+
+        This validator executes before standard model validation. It inspects
+        the `name` field to determine which concrete template model should be
+        used (e.g. PodKillScenarioTemplate, HPAScaleStressCPUScenarioTemplate).
+
+        The raw `template` dictionary is then validated against the selected
+        template model and replaced with a strongly-typed instance.
+
+        This ensures:
+            - Strict schema validation per scenario type
+            - No acceptance of arbitrary or mismatched template fields
+            - Clear error reporting for unsupported scenario types
+            - Consistent typing of `template` across the system
+
+        Raises:
+            ValueError:
+                - If the scenario type is not registered
+        """
+        scenario_name: str = values.get("name")
+        template_data: Dict[str, Any] = values.get("template")
+        template_model = SCENARIO_TEMPLATES_MAPPING.get(scenario_name)
+
+        if not template_model:
+            raise ValueError(f"Scenario template {scenario_name} not found.")
+
+        values["template"] = template_model.model_validate(template_data)
+        return values

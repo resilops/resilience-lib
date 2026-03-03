@@ -16,6 +16,7 @@ from reslib.k8s.utils import (
     raise_on_desired_replicas,
 )
 from reslib.rollbacks.schemas import PodRespawnTimeout
+from reslib.schemas.scenario import ResiliencyScenario
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +43,8 @@ async def wait_until_pod_respawn(**kwargs):
     args = PodRespawnTimeout(**kwargs)
 
     workload: WorkloadState = get_context("workload")
-    namespace = get_context("namespace")
+    scenario: ResiliencyScenario = get_context("scenario")
+    namespace: str = scenario.template.namespace
     k8s = KubernetesClient()
 
     tasks: List[Tuple[Awaitable[Any], str]] = [

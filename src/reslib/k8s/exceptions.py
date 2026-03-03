@@ -41,6 +41,10 @@ class HpaNotConfiguredError(BaseError):
     pass
 
 
+class PdbNotConfiguredError(BaseError):
+    pass
+
+
 class MetricsServerUnavailableError(BaseError):
     pass
 

@@ -40,7 +40,7 @@ async def watch_task_group(
 
     # Wrap coroutines into asyncio.Task objects
     tasks: List[asyncio.Task[Any]] = [
-        asyncio.create_task(coro, name=name) for coro, name in tasks
+        asyncio.create_task(coro, name=name) for coro, name in tasks  # noqa
     ]
 
     # Wait for tasks based on return_when and timeout
@@ -71,7 +71,7 @@ async def watch_task_group(
                     "pending_tasks": [t.get_name() for t in pending],
                 },
             },
-            fix_hint=("Increase timeout or investigate long-running or blocked tasks."),
+            fix_hint="Increase timeout or investigate long-running or blocked tasks.",
             retryable=False,
         )
 
