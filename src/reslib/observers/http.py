@@ -10,8 +10,9 @@ from reslib.core.watchdog import watch_task_group
 from reslib.k8s.client import KubernetesClient
 from reslib.k8s.schema import WorkloadStatus
 from reslib.k8s.utils import get_workload_status
-from reslib.observers.schemas import HTTPLatencyArgsTemplate, MetricsPayload
+from reslib.observers.schemas import HTTPLatencyArgsTemplate
 from reslib.schemas.scenario import ResiliencyScenario
+from reslib.schemas.telemetry import MetricsPayload
 
 
 def _emit_metrics(

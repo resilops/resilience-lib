@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 import httpx
 
-from reslib.observers.schemas import EventPayload, MetricsPayload
+from reslib.schemas.telemetry import EventPayload, MetricsPayload
 
 
 class BaseTelemetry(ABC):

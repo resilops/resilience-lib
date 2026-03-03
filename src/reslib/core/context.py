@@ -7,9 +7,9 @@ from typing import Any, Dict, Optional
 from reslib import helpers as h
 from reslib.constants import AsyncFunc, EventEnum
 from reslib.exceptions import BaseError, ScenarioContextError
-from reslib.observers.schemas import EventPayload
 from reslib.runtime.phases import ExecutionPhase
 from reslib.schemas.scenario import ObserverSpec, ResiliencyScenario
+from reslib.schemas.telemetry import EventPayload
 
 logger = logging.getLogger(__name__)
 

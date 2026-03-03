@@ -1,6 +1,6 @@
 from typing import Any, Dict, List
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from reslib.runtime.phases import ExecutionPhase
 from reslib.schemas.templates import (
@@ -74,6 +74,8 @@ class ResiliencyScenario(BaseModel):
     - `steps`: ordered list of guardrail/action/rollback steps
     - `observer`: monitoring configuration
     """
+
+    model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
 
     name: str = Field(..., description="Name of the scenario template.")
     title: str = Field(..., description="Title of the scenario template.")

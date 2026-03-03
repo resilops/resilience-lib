@@ -12,7 +12,7 @@ class HpaScaleDownSchema(BaseModel):
 
     timeout_seconds: int = Field(
         500,
-        le=1200,  # Some upper limit.
+        le=1500,  # Some upper limit.
         description="Max time it takes for the pods to scale down",
     )
 

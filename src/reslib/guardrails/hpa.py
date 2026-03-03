@@ -11,7 +11,7 @@ from reslib.k8s.exceptions import (
     PodsToStressExceededError,
     WorkloadAtMaxError,
 )
-from reslib.k8s.schema import HPAConfig, HPAMetricSpec, WorkloadState
+from reslib.k8s.schema import HPAMetricSpec, WorkloadState
 from reslib.k8s.utils import (
     calculate_hpa_trigger,
     get_hpa_resource_metric,
@@ -21,7 +21,7 @@ from reslib.schemas.scenario import ResiliencyScenario
 logger = logging.getLogger(__name__)
 
 
-def validate_metric_and_resource() -> None:
+async def validate_metric_and_resource() -> None:
     """
     Validate that the requested HPA metric source and resource type are supported.
 
@@ -83,16 +83,12 @@ def validate_metric_and_resource() -> None:
         )
 
 
-def validate_hpa_resource_metric() -> HPAMetricSpec:
+async def validate_hpa_resource_metric() -> None:
     """
     Validate that the workload HPA defines the requested metric and resource type.
 
     This function parses `HPAResourceMetricSchema` from kwargs, then searches the
     workload's HPA spec for a matching resource metric (e.g., CPU or memory).
-
-    Returns:
-        HPAMetricSpec:
-            The matching HPA metric specification.
 
     Raises:
         BaseError:
@@ -129,15 +125,12 @@ def validate_hpa_resource_metric() -> HPAMetricSpec:
             retryable=False,
         )
 
-    return hpa_metric
+    return None
 
 
-def ensure_hpa_exists() -> HPAConfig:
+async def ensure_hpa_exists() -> None:
     """
     Ensure that a workload has an HPA configured.
-
-    Returns:
-        The HPAConfig of the workload.
 
     Raises:
         HpaNotConfiguredError: If no HPA is configured for the workload.
@@ -158,10 +151,10 @@ def ensure_hpa_exists() -> HPAConfig:
             ),
             retryable=False,
         )
-    return workload.spec.hpa
+    return None
 
 
-def ensure_hpa_not_at_max_replicas() -> None:
+async def ensure_hpa_not_at_max_replicas() -> None:
     """
     Validate that the workload is not already at the HPA maximum replicas.
 
@@ -175,7 +168,7 @@ def ensure_hpa_not_at_max_replicas() -> None:
     """
     workload: WorkloadState = get_context("workload")
     if not workload.spec.hpa:
-        return
+        return None
 
     ready = workload.status.ready_replicas
     max_replicas = workload.spec.hpa.max_replicas
@@ -202,9 +195,10 @@ def ensure_hpa_not_at_max_replicas() -> None:
             ),
             retryable=True,
         )
+    return None
 
 
-def validate_pods_to_stress_cpu() -> int:
+async def validate_pods_to_stress_cpu() -> None:
     """
     Validate that the computed number of pods to stress stays within
     the configured safety limits.
@@ -212,9 +206,6 @@ def validate_pods_to_stress_cpu() -> int:
     This guardrail uses HPA metrics and CPU thresholds to determine how
     many pods should be stressed, then ensures that enough pods remain
     idle based on the configured minimum idle percentage.
-
-    Returns:
-        The number of pods to stress based on HPA metrics and thresholds.
 
     Raises:
         PodsToStressExceededError:
@@ -275,4 +266,4 @@ def validate_pods_to_stress_cpu() -> int:
             retryable=True,
         )
 
-    return pods_to_stress
+    return None

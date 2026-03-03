@@ -11,10 +11,10 @@ from reslib.exceptions import BaseError
 from reslib.k8s.schema import WorkloadState
 from reslib.k8s.utils import get_workload
 from reslib.logging import setup_logging
-from reslib.observers.schemas import EventPayload
 from reslib.runtime import resolve as resolver
 from reslib.runtime.phases import ExecutionPhase
 from reslib.schemas.scenario import ResiliencyScenario
+from reslib.schemas.telemetry import EventPayload
 
 logger = logging.getLogger(__name__)
 

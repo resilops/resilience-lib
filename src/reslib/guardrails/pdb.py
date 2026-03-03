@@ -7,7 +7,7 @@ from reslib.k8s.exceptions import (
 from reslib.k8s.schema import WorkloadState
 
 
-def ensure_pdb_not_violated(**kwargs) -> None:
+async def ensure_pdb_not_violated(**kwargs) -> None:
     """
     Validate that the planned pod disruption does not violate the workload
     PodDisruptionBudget (PDB) minimum availability constraint.
@@ -30,7 +30,7 @@ def ensure_pdb_not_violated(**kwargs) -> None:
     if not args.allow_missing_pdb and not pdb_config_exists:
         raise PdbNotConfiguredError(
             error_code="PDB_NOT_CONFIGURED",
-            message=("PodDisruptionBudget is not configured for the target workload."),
+            message="PodDisruptionBudget is not configured for the target workload.",
             context={
                 "rule": "pdb must exist unless allow_missing_pdb is true",
                 "inputs": {

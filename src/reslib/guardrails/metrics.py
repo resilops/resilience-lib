@@ -8,7 +8,7 @@ from reslib.k8s.utils import get_workload_pods
 from reslib.schemas.scenario import ResiliencyScenario
 
 
-def ensure_metrics_server_available() -> None:
+async def ensure_metrics_server_available() -> None:
     """
     Validate that the Kubernetes Metrics Server is reachable and returns
     pod metrics for the target workload.

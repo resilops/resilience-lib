@@ -55,7 +55,7 @@ async def wait_until_pod_respawn(**kwargs):
                 timeout=args.timeout_seconds,
                 poll_interval=3,
                 k8s=k8s,
-                workload_name=workload,
+                workload_name=workload.spec.name,
                 namespace=namespace,
             ),
             REACHED_DESIRED_REPLICA_TASK_NAME,

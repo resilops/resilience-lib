@@ -5,7 +5,7 @@ from reslib.schemas.scenario import ResiliencyScenario
 from reslib.schemas.validators import QuantitySelection
 
 
-def validate_min_remaining_replicas() -> None:
+async def validate_min_remaining_replicas() -> None:
     """
     Validate that terminating a selected number of pods does not violate
     minimum workload availability constraints.

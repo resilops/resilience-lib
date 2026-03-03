@@ -8,7 +8,7 @@ from reslib.k8s.exceptions import (
 from reslib.k8s.schema import WorkloadState
 
 
-def ensure_workload_steady() -> None:
+async def ensure_workload_steady() -> None:
     """
     Validate that a Kubernetes workload is healthy and ready for disruption.
 
