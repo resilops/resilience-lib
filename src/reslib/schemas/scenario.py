@@ -37,13 +37,22 @@ class ObserverConfig(BaseModel):
     """
 
     sampling_interval_seconds: int = Field(
-        default=5, ge=1, description="Interval between observer samples in seconds."
+        default=5,
+        ge=1,
+        le=10,
+        description="Interval between observer samples in seconds.",
     )
     warmup_period_seconds: int = Field(
-        default=0, description="Initial warmup period before measurements in seconds."
+        default=0,
+        ge=0,
+        le=20,
+        description="Initial warmup period before measurements in seconds.",
     )
     grace_period_seconds: int = Field(
-        default=0, description="Grace period to allow system stabilization in seconds."
+        default=0,
+        ge=0,
+        le=20,
+        description="Grace period to allow system stabilization in seconds.",
     )
 
 

@@ -18,5 +18,6 @@ class HTTPLatencyArgsTemplate(BaseModel):
     requests_per_interval: int = Field(
         default=3,
         ge=1,
+        le=10,
         description="Number of parallel HTTP requests to send per interval.",
     )
