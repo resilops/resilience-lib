@@ -3,7 +3,9 @@ import math
 from pydantic import BaseModel, Field, model_validator
 
 from reslib.constants import QuantitySelectionModeEnum
+from reslib.core.context import get_context
 from reslib.exceptions import QuantitySelectionError
+from reslib.schemas.scenario import ResiliencyScenario
 
 
 class QuantitySelection(BaseModel):
@@ -35,9 +37,12 @@ class QuantitySelection(BaseModel):
             - Percentage-based selection must not exceed 100%
         """
         if self.mode == QuantitySelectionModeEnum.PERCENTAGE and self.amount > 100:
+            scenario: ResiliencyScenario = get_context("scenario")
             raise QuantitySelectionError(
                 error_code="INVALID_PERCENTAGE_SELECTION",
                 message="Percentage-based quantity selection exceeds allowed limit.",
+                namespace=scenario.template.namespace,
+                workload=scenario.template.workload,
                 context={
                     "rule": "percentage <= 100",
                     "inputs": {
@@ -67,9 +72,12 @@ class QuantitySelection(BaseModel):
             return math.floor(total * self.amount / 100)
 
         if self.amount > total:
+            scenario: ResiliencyScenario = get_context("scenario")
             raise QuantitySelectionError(
                 error_code="ABSOLUTE_SELECTION_EXCEEDS_TOTAL",
                 message="Requested absolute quantity exceeds available total.",
+                namespace=scenario.template.namespace,
+                workload=scenario.template.workload,
                 context={
                     "rule": "amount <= total",
                     "inputs": {

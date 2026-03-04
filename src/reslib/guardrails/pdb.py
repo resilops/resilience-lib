@@ -5,6 +5,7 @@ from reslib.k8s.exceptions import (
     PdbNotConfiguredError,
 )
 from reslib.k8s.schema import WorkloadState
+from reslib.schemas.scenario import ResiliencyScenario
 
 
 async def ensure_pdb_not_violated(**kwargs) -> None:
@@ -23,6 +24,9 @@ async def ensure_pdb_not_violated(**kwargs) -> None:
             if required context is missing.
     """
     workload: WorkloadState = get_context("workload")
+    scenario: ResiliencyScenario = get_context("scenario")
+    namespace = scenario.template.namespace
+    workload_name = scenario.template.workload
     args = PDBConfigurationAllowMissing(**kwargs)
 
     pdb_config_exists: bool = workload.policies and workload.policies.pdb is not None
@@ -31,14 +35,16 @@ async def ensure_pdb_not_violated(**kwargs) -> None:
         raise PdbNotConfiguredError(
             error_code="PDB_NOT_CONFIGURED",
             message="PodDisruptionBudget is not configured for the target workload.",
+            namespace=namespace,
+            workload=workload_name,
             context={
                 "rule": "pdb must exist unless allow_missing_pdb is true",
                 "inputs": {
                     "allow_missing_pdb": args.allow_missing_pdb,
                 },
                 "observed": {
-                    "namespace": workload.spec.name,
-                    "workload": workload.spec.name,
+                    "namespace": namespace,
+                    "workload": workload_name,
                     "pdb_present": False,
                 },
                 "required": {
@@ -72,6 +78,8 @@ async def ensure_pdb_not_violated(**kwargs) -> None:
                 "Planned disruption would violate PodDisruptionBudget "
                 "minimum availability."
             ),
+            namespace=namespace,
+            workload=workload_name,
             context={
                 "rule": "remaining_ready_replicas >= pdb.min_available",
                 "inputs": {

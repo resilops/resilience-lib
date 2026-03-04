@@ -6,6 +6,7 @@ from reslib.k8s.exceptions import (
     WorkloadStatusUnavailableError,
 )
 from reslib.k8s.schema import WorkloadState
+from reslib.schemas.scenario import ResiliencyScenario
 
 
 async def ensure_workload_steady() -> None:
@@ -25,6 +26,9 @@ async def ensure_workload_steady() -> None:
         WorkloadFaultyError: If the workload is in a faulty state
     """
     workload: WorkloadState = get_context("workload")
+    scenario: ResiliencyScenario = get_context("scenario")
+    namespace = scenario.template.namespace
+    workload_name = workload.spec.name
     status = workload.status
 
     if not status:
@@ -34,6 +38,8 @@ async def ensure_workload_steady() -> None:
                 "Workload status is missing; cannot determine readiness for "
                 "disruption."
             ),
+            namespace=namespace,
+            workload=workload_name,
             context={
                 "rule": "workload.status is not None",
                 "inputs": {"workload_name": workload.spec.name},
@@ -50,6 +56,8 @@ async def ensure_workload_steady() -> None:
         raise WorkloadReconcilingError(
             error_code="WORKLOAD_RECONCILING",
             message="Workload is currently reconciling; disruption is blocked.",
+            namespace=namespace,
+            workload=workload_name,
             context={
                 "rule": "workload.status.reconciling is False",
                 "inputs": {"workload_name": workload.spec.name},
@@ -63,6 +71,8 @@ async def ensure_workload_steady() -> None:
         raise WorkloadNotAvailableError(
             error_code="WORKLOAD_NOT_AVAILABLE",
             message="Workload is not available/stable; disruption is blocked.",
+            namespace=namespace,
+            workload=workload_name,
             context={
                 "rule": "workload.status.is_available is True",
                 "inputs": {"workload_name": workload.spec.name},
@@ -79,6 +89,8 @@ async def ensure_workload_steady() -> None:
         raise WorkloadFaultyError(
             error_code="WORKLOAD_FAULTY",
             message="Workload is in a faulty state; disruption is blocked.",
+            namespace=namespace,
+            workload=workload_name,
             context={
                 "rule": "workload.status.is_faulty is False",
                 "inputs": {"workload_name": workload.spec.name},

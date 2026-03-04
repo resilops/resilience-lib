@@ -8,6 +8,8 @@ class BaseError(Exception):
 
     error_code: str
     message: str
+    namespace: str
+    workload: str
     context: Dict[str, Any] = field(default_factory=dict)
     fix_hint: Optional[str] = None
     retryable: bool = False
@@ -23,6 +25,8 @@ class BaseError(Exception):
             "type": self.__class__.__name__,
             "error_code": self.error_code,
             "message": self.message,
+            "namespace": self.namespace,
+            "workload": self.workload,
             "context": self.context,
             "retryable": self.retryable,
             **({"fix_hint": self.fix_hint} if self.fix_hint else {}),

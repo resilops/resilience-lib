@@ -59,6 +59,9 @@ async def execute_cpu_stress(
     Raises:
         CPUStressCommandFailed: If stress command fails or outputs stderr.
     """
+    scenario: ResiliencyScenario = get_context("scenario")
+    namespace = scenario.template.namespace
+    workload_name = scenario.template.workload
     command = [
         "stress-ng",
         "--cpu",
@@ -104,6 +107,8 @@ async def execute_cpu_stress(
             raise CPUStressCommandFailed(
                 error_code="CPU_STRESS_COMMAND_ERROR",
                 message="CPU stress command returned an error output.",
+                namespace=namespace,
+                workload=workload_name,
                 context={
                     "rule": "stress-ng produces no stderr output",
                     "observed": {
@@ -128,6 +133,8 @@ async def execute_cpu_stress(
         raise CPUStressCommandFailed(
             error_code="CPU_STRESS_TIMEOUT",
             message="CPU stress execution exceeded allowed timeout.",
+            namespace=namespace,
+            workload=workload_name,
             context={
                 "rule": "stress command completes within timeout_seconds",
                 "observed": {
@@ -147,6 +154,8 @@ async def execute_cpu_stress(
         raise CPUStressCommandFailed(
             error_code="CPU_STRESS_EXECUTION_FAILED",
             message="CPU stress command failed during pod execution.",
+            namespace=namespace,
+            workload=workload_name,
             context={
                 "rule": "stress-ng command executes successfully",
                 "observed": {

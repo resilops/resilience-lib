@@ -33,11 +33,15 @@ async def validate_metric_and_resource() -> None:
             If the metric source or resource type is not in the supported sets.
     """
     scenario: ResiliencyScenario = get_context("scenario")
+    namespace = scenario.template.namespace
+    workload_name = scenario.template.workload
 
     if scenario.template.metric_source not in SUPPORTED_HPA_METRIC_SOURCES:
         raise NotSupportedError(
             error_code="HPA_METRIC_SOURCE_NOT_SUPPORTED",
             message="Requested HPA metric source is not supported for scaling tests.",
+            namespace=namespace,
+            workload=workload_name,
             context={
                 "rule": "metric_source in SUPPORTED_HPA_METRIC_SOURCES",
                 "inputs": {
@@ -62,6 +66,8 @@ async def validate_metric_and_resource() -> None:
         raise NotSupportedError(
             error_code="HPA_RESOURCE_TYPE_NOT_SUPPORTED",
             message="Requested HPA resource type is not supported for scaling tests.",
+            namespace=namespace,
+            workload=workload_name,
             context={
                 "rule": "resource_type in SUPPORTED_HPA_RESOURCE_TYPES",
                 "inputs": {
@@ -97,6 +103,8 @@ async def validate_hpa_resource_metric() -> None:
     """
     workload: WorkloadState = get_context("workload")
     scenario: ResiliencyScenario = get_context("scenario")
+    namespace = scenario.template.namespace
+    workload_name = scenario.template.workload
 
     hpa_metric: Optional[HPAMetricSpec] = get_hpa_resource_metric(
         hpa=workload.spec.hpa,
@@ -108,6 +116,8 @@ async def validate_hpa_resource_metric() -> None:
         raise HpaMetricsNotFoundError(
             error_code="HPA_METRIC_NOT_FOUND",
             message="Requested HPA metric was not found in the HPA specification.",
+            namespace=namespace,
+            workload=workload_name,
             context={
                 "rule": "HPA defines a metric matching (metric_source, resource_type)",
                 "inputs": {
@@ -136,10 +146,15 @@ async def ensure_hpa_exists() -> None:
         HpaNotConfiguredError: If no HPA is configured for the workload.
     """
     workload: WorkloadState = get_context("workload")
+    scenario: ResiliencyScenario = get_context("scenario")
+    namespace = scenario.template.namespace
+    workload_name = scenario.template.workload
     if not workload.spec.hpa:
         raise HpaNotConfiguredError(
             error_code="HPA_NOT_CONFIGURED",
             message="Workload does not have an HPA configuration.",
+            namespace=namespace,
+            workload=workload_name,
             context={
                 "rule": "workload.spec.hpa is None",
                 "inputs": {},
@@ -167,6 +182,9 @@ async def ensure_hpa_not_at_max_replicas() -> None:
             If the workload is already at the HPA maximum replica count.
     """
     workload: WorkloadState = get_context("workload")
+    scenario: ResiliencyScenario = get_context("scenario")
+    namespace = scenario.template.namespace
+    workload_name = scenario.template.workload
     if not workload.spec.hpa:
         return None
 
@@ -176,6 +194,8 @@ async def ensure_hpa_not_at_max_replicas() -> None:
         raise WorkloadAtMaxError(
             error_code="WORKLOAD_AT_HPA_MAX_REPLICAS",
             message="Workload is already at or above the HPA maximum replicas.",
+            namespace=namespace,
+            workload=workload_name,
             context={
                 "rule": "ready_replicas < hpa.max_replicas",
                 "inputs": {
@@ -215,6 +235,8 @@ async def validate_pods_to_stress_cpu() -> None:
 
     workload: WorkloadState = get_context("workload")
     scenario: ResiliencyScenario = get_context("scenario")
+    namespace = scenario.template.namespace
+    workload_name = scenario.template.workload
 
     hpa_metric = get_hpa_resource_metric(
         hpa=workload.spec.hpa,
@@ -238,6 +260,8 @@ async def validate_pods_to_stress_cpu() -> None:
         raise PodsToStressExceededError(
             error_code="PODS_TO_STRESS_EXCEEDS_IDLE_SAFETY_LIMIT",
             message="Calculated number of pods to stress exceeds allowed safety limit.",
+            namespace=namespace,
+            workload=workload_name,
             context={
                 "rule": "pods_to_stress <= " "ready_replicas - required_idle_pods",
                 "inputs": {

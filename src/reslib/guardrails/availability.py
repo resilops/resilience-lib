@@ -28,6 +28,8 @@ async def validate_min_remaining_replicas() -> None:
     """
     workload: WorkloadState = get_context("workload")
     scenario: ResiliencyScenario = get_context("scenario")
+    namespace = scenario.template.namespace
+    workload_name = scenario.template.workload
 
     total = workload.status.ready_replicas
     selection = QuantitySelection(
@@ -41,6 +43,8 @@ async def validate_min_remaining_replicas() -> None:
         raise DisruptionExceedMinAvailabilityError(
             error_code="DISRUPTION_TERMINATES_ALL_REPLICAS",
             message="Requested disruption would terminate all running pods.",
+            namespace=namespace,
+            workload=workload_name,
             context={
                 "rule": "remaining_replicas >= 1",
                 "inputs": {
@@ -67,6 +71,8 @@ async def validate_min_remaining_replicas() -> None:
             message=(
                 "Requested disruption violates minimum remaining replicas constraint."
             ),
+            namespace=namespace,
+            workload=workload_name,
             context={
                 "rule": (
                     "remaining_replicas >= "

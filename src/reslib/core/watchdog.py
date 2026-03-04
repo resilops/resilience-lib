@@ -2,6 +2,7 @@ import asyncio
 import time
 from typing import Any, Awaitable, Callable, List, Optional, Tuple
 
+from reslib.core.context import get_context
 from reslib.exceptions import TaskGroupTimeoutError, TaskTimeoutError
 
 
@@ -60,9 +61,12 @@ async def watch_task_group(
                 raise exc
 
     if pending:
+        scenario = get_context("scenario")
         TaskGroupTimeoutError(
             error_code="TASK_GROUP_TIMEOUT",
             message="Task group execution exceeded allowed timeout.",
+            namespace=scenario.template.namespace,
+            workload=scenario.template.workload,
             context={
                 "rule": "all required tasks complete before timeout",
                 "observed": {
@@ -105,9 +109,12 @@ async def watch_until(
         timeout_exception if timeout occurs, default is TimeoutError.
     """
     deadline = time.monotonic() + timeout
+    scenario = get_context("scenario")
     timeout_exception = timeout_exception or TaskTimeoutError(
         error_code="WATCH_CONDITION_TIMEOUT",
         message="Condition was not satisfied within the allowed timeout.",
+        namespace=scenario.template.namespace,
+        workload=scenario.template.workload,
         context={
             "rule": "condition evaluates to truthy before timeout",
             "inputs": {

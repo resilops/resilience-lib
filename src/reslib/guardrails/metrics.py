@@ -28,6 +28,7 @@ async def ensure_metrics_server_available() -> None:
     workload: WorkloadState = get_context("workload")
     scenario: ResiliencyScenario = get_context("scenario")
     namespace: str = scenario.template.namespace
+    workload_name: str = scenario.template.workload
 
     k8s = KubernetesClient()
     pods = get_workload_pods(k8s=k8s, namespace=namespace, workload_spec=workload.spec)
@@ -46,6 +47,8 @@ async def ensure_metrics_server_available() -> None:
         raise MetricsServerUnavailableError(
             error_code="METRICS_SERVER_API_ERROR",
             message="Failed to query pod metrics from metrics.k8s.io API.",
+            namespace=namespace,
+            workload=workload_name,
             context={
                 "rule": "metrics.k8s.io API is reachable and authorized",
                 "inputs": {
@@ -70,6 +73,8 @@ async def ensure_metrics_server_available() -> None:
         raise MetricsServerUnavailableError(
             error_code="METRICS_SERVER_QUERY_UNEXPECTED_ERROR",
             message="Unexpected error occurred while querying pod metrics.",
+            namespace=namespace,
+            workload=workload_name,
             context={
                 "rule": "metrics query succeeds without unexpected exceptions",
                 "inputs": {
@@ -96,6 +101,8 @@ async def ensure_metrics_server_available() -> None:
             message=(
                 "Metrics response contains no container metrics for the selected pod."
             ),
+            namespace=namespace,
+            workload=workload_name,
             context={
                 "rule": "metrics response includes non-empty `containers` list",
                 "inputs": {

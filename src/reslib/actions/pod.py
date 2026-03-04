@@ -58,6 +58,8 @@ def watch_pod_deletion(k8s: KubernetesClient, pod: V1Pod, namespace: str, timeou
             timeout_exception=PodDeletionTimeoutError(
                 error_code="POD_DELETION_TIMEOUT",
                 message="Pod was not deleted within the allowed timeout.",
+                namespace=namespace,
+                workload=get_context("scenario").template.workload,
                 context={
                     "rule": "pod no longer exists before timeout",
                     "inputs": {
@@ -108,6 +110,7 @@ async def terminate_pods(**kwargs) -> Dict:
     workload: WorkloadState = get_context("workload")
     scenario: ResiliencyScenario = get_context("scenario")
     namespace: str = scenario.template.namespace
+    workload_name: str = scenario.template.workload
 
     # 2. Determine pods to terminate
     selection = QuantitySelection(
@@ -121,6 +124,8 @@ async def terminate_pods(**kwargs) -> Dict:
         raise PodsSelectionError(
             error_code="NO_PODS_SELECTED_FOR_TERMINATION",
             message="Resolved pod termination count is zero; nothing to terminate.",
+            namespace=namespace,
+            workload=workload_name,
             context={
                 "rule": "pods_to_terminate >= 1",
                 "inputs": {
@@ -149,11 +154,13 @@ async def terminate_pods(**kwargs) -> Dict:
         raise PodsSelectionError(
             error_code="NO_CANDIDATE_PODS_FOUND",
             message="No eligible running pods were found for termination.",
+            namespace=namespace,
+            workload=workload_name,
             context={
                 "rule": "at least one candidate pod must be available for termination",
                 "inputs": {
                     "namespace": namespace,
-                    "workload": workload.spec.name,
+                    "workload": workload_name,
                     "requested_terminations": pods_to_terminate,
                 },
                 "observed": {

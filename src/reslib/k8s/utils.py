@@ -20,6 +20,7 @@ from reslib.constants import (
     HpaResourceTypeEnum,
     K8DeploymentKind,
 )
+from reslib.core.context import get_context
 from reslib.k8s.client import KubernetesClient
 from reslib.k8s.exceptions import (
     ContainerCrashedError,
@@ -304,6 +305,8 @@ def get_workload(
             raise WorkloadNotFound(
                 error_code="WORKLOAD_NOT_FOUND",
                 message="Requested workload deployment was not found.",
+                namespace=namespace,
+                workload=name,
                 context={
                     "rule": "deployment exists in namespace",
                     "inputs": {
@@ -464,6 +467,7 @@ def calculate_hpa_trigger(
     Raises:
         HpaNotConfiguredError: If HPA metric lacks 'averageUtilization'.
     """
+    scenario = get_context("scenario")
     target: dict = metric.resource.get("target", {})
     average_utilization = target.get("average_utilization")
 
@@ -471,6 +475,8 @@ def calculate_hpa_trigger(
         raise HpaNotConfiguredError(
             error_code="HPA_AVERAGE_UTILIZATION_MISSING",
             message="HPA metric configuration is missing averageUtilization target.",
+            namespace=scenario.template.namespace,
+            workload=scenario.template.workload,
             context={
                 "rule": "HPA metric.resource.target.averageUtilization must be defined",
                 "inputs": {
@@ -545,6 +551,8 @@ def raise_on_container_fail(
                 raise ContainerCrashedError(
                     error_code="CONTAINER_WAITING_UNEXPECTED",
                     message="Container entered an unexpected waiting state.",
+                    namespace=namespace,
+                    workload=workload_spec.name,
                     context={
                         "rule": (
                             "container waiting reason must be in allowed waiting states"
@@ -575,6 +583,8 @@ def raise_on_container_fail(
                 raise ContainerCrashedError(
                     error_code="CONTAINER_TERMINATED_UNEXPECTED",
                     message="Container terminated with an unexpected exit condition.",
+                    namespace=namespace,
+                    workload=workload_spec.name,
                     context={
                         "rule": (
                             "container termination reason must be "
@@ -630,6 +640,8 @@ def raise_on_hpa_scale(
         raise HpaScaledError(
             error_code="HPA_SCALE_DETECTED",
             message="Workload replicas increased due to HPA scaling.",
+            namespace=namespace,
+            workload=workload.spec.name,
             context={
                 "rule": "current_ready_replicas <= initial_ready_replicas",
                 "inputs": {
@@ -681,6 +693,8 @@ def raise_on_desired_replicas(
         raise ReachedDesiredReplicaError(
             error_code="DESIRED_REPLICA_COUNT_REACHED",
             message="Deployment has reached or exceeded the desired replica count.",
+            namespace=namespace,
+            workload=workload_name,
             context={
                 "rule": "ready_replicas < desired_replicas",
                 "inputs": {
@@ -750,6 +764,8 @@ def raise_on_replicas_restored_cpu(
                 "Workload replicas have stabilized following CPU "
                 "stress-induced scaling."
             ),
+            namespace=namespace,
+            workload=initial_workload_state.spec.name,
             context={
                 "rule": (
                     "desired_replicas and ready_replicas fall below "
