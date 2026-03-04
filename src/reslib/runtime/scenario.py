@@ -40,7 +40,6 @@ def _lib_setup() -> None:
 
 async def _execute_phase(
     *,
-    scenario: ResiliencyScenario,
     phase: ExecutionPhase,
     start_event: EventEnum,
     success_event: EventEnum,
@@ -57,16 +56,19 @@ async def _execute_phase(
       5. Re-raises exceptions for caller handling.
 
     Args:
-        scenario: Resiliency scenario containing template and steps.
         phase: The phase to execute (guardrail, action, rollback).
         start_event: Event recorded on execution phase start.
         success_event: Event recorded on successful execution.
         failure_event: Event recorded on failure.
     """
-    telemetry = get_context("telemetry")
+    telemetry: h.BaseTelemetry = get_context("telemetry")
+    scenario: ResiliencyScenario = get_context("scenario")
+
     telemetry.emit_event(
         event=EventPayload(
             event_name=start_event,
+            namespace=scenario.template.workload,
+            workload=scenario.template.workload,
             phase=phase,
             details=f"Phase: {phase.value} execution started",
         )
@@ -77,12 +79,20 @@ async def _execute_phase(
             func: AsyncFunc = resolver.resolve(phase=step.type, name=step.name)
             result = await func(**step.kwargs)
             telemetry.emit_event(
-                event=EventPayload(event_name=success_event, phase=phase, data=result)
+                event=EventPayload(
+                    event_name=success_event,
+                    namespace=scenario.template.namespace,
+                    workload=scenario.template.workload,
+                    phase=phase,
+                    data=result,
+                )
             )
         except BaseError as exc:
             telemetry.emit_event(
                 event=EventPayload(
                     event_name=failure_event,
+                    namespace=scenario.template.namespace,
+                    workload=scenario.template.workload,
                     phase=phase,
                     details=str(exc),
                     error=exc.__class__.__name__,
@@ -94,6 +104,8 @@ async def _execute_phase(
             telemetry.emit_event(
                 event=EventPayload(
                     event_name=failure_event,
+                    namespace=scenario.template.namespace,
+                    workload=scenario.template.workload,
                     phase=phase,
                     details=str(exc),
                     error=exc.__class__.__name__,
@@ -138,7 +150,6 @@ async def execute_resilience_scenario(
     ):
         # 1. Guardrail phase (fatal if validation fails)
         await _execute_phase(
-            scenario=scenario,
             phase=ExecutionPhase.GUARDRAIL,
             start_event=EventEnum.GUARDRAIL_STARTED,
             success_event=EventEnum.GUARDRAIL_SUCCESS,
@@ -148,14 +159,12 @@ async def execute_resilience_scenario(
         # 2. Action and rollback phases with observer context
         async with ObserverContext(resolver=resolver):
             await _execute_phase(
-                scenario=scenario,
                 phase=ExecutionPhase.ACTION,
                 start_event=EventEnum.ACTION_STARTED,
                 success_event=EventEnum.ACTION_SUCCESS,
                 failure_event=EventEnum.ACTION_FAILED,
             )
             await _execute_phase(
-                scenario=scenario,
                 phase=ExecutionPhase.ROLLBACK,
                 start_event=EventEnum.ROLLBACK_STARTED,
                 success_event=EventEnum.ROLLBACK_SUCCESS,

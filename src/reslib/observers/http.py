@@ -24,9 +24,12 @@ def _emit_metrics(
     """Emit a single observer metric with optional error or latency info."""
 
     telemetry: h.BaseTelemetry = get_context("telemetry")
+    scenario: ResiliencyScenario = get_context("scenario")
 
     metrics = MetricsPayload(
         metrics_name=MetricsEnum.HTTP,
+        namespace=scenario.template.namespace,
+        workload=scenario.template.workload,
         function="measure_endpoint_latency",
         workload_status=status,
     )

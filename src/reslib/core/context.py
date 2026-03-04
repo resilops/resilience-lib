@@ -8,7 +8,7 @@ from reslib import helpers as h
 from reslib.constants import AsyncFunc, EventEnum
 from reslib.exceptions import BaseError, ScenarioContextError
 from reslib.runtime.phases import ExecutionPhase
-from reslib.schemas.scenario import ObserverSpec, ResiliencyScenario
+from reslib.schemas.scenario import ResiliencyScenario
 from reslib.schemas.telemetry import EventPayload
 
 logger = logging.getLogger(__name__)
@@ -89,18 +89,18 @@ class ObserverContext:
 
     def __init__(self, resolver: Any):
         self.resolver = resolver
-        self.spec: Optional[ObserverSpec] = None
+        self.scenario: Optional[ResiliencyScenario] = None
         self.telemetry: Optional[h.BaseTelemetry] = None
         self._task: Optional[asyncio.Task] = None
 
     async def _observer_loop(self):
         """Run the observer function repeatedly at the configured sampling interval."""
         observer_func: AsyncFunc = self.resolver.resolve(
-            phase=ExecutionPhase.OBSERVER, name=self.spec.name
+            phase=ExecutionPhase.OBSERVER, name=self.scenario.observer.name
         )
         while True:
-            await observer_func(**self.spec.kwargs)
-            await asyncio.sleep(self.spec.config.sampling_interval_seconds)
+            await observer_func(**self.scenario.observer.kwargs)
+            await asyncio.sleep(self.scenario.observer.config.sampling_interval_seconds)
 
     async def start(self) -> None:
         """
@@ -109,39 +109,46 @@ class ObserverContext:
         If the observer fails during warmup, the exception is raised
         and the scenario execution is aborted.
         """
-        logger.info("Starting observer: %s", self.spec.name)
+        logger.info("Starting observer: %s", self.scenario.observer.name)
+        scenario_ctx: ResiliencyScenario = get_context("scenario")
+        namespace = scenario_ctx.template.namespace
+        workload = scenario_ctx.template.workload
         self.telemetry.emit_event(
             event=EventPayload(
                 event_name=EventEnum.OBSERVER_STARTED,
+                namespace=namespace,
+                workload=workload,
                 phase=ExecutionPhase.OBSERVER,
-                data={"observer": self.spec.name},
+                data={"observer": self.scenario.observer.name},
             )
         )
 
         self._task = asyncio.create_task(
             self._observer_loop(),
-            name=f"observer:{self.spec.name}",
+            name=f"observer:{self.scenario.observer.name}",
         )
 
         # Allow observer to establish baseline
-        if self.spec.config.warmup_period_seconds > 0:
+        if self.scenario.observer.config.warmup_period_seconds > 0:
             logger.info(
                 "Observer %s warming up for %s seconds",
-                self.spec.name,
-                self.spec.config.warmup_period_seconds,
+                self.scenario.observer.name,
+                self.scenario.observer.config.warmup_period_seconds,
             )
-            await asyncio.sleep(self.spec.config.warmup_period_seconds)
+            await asyncio.sleep(self.scenario.observer.config.warmup_period_seconds)
 
         # Fail fast if observer, if there are any errors during warmup
         if self._task.done():
             exc = self._task.exception()
-            data = {"observer_name": self.spec.name}
+            data = {"observer_name": self.scenario.observer.name}
             if exc:
                 if isinstance(exc, BaseError):
                     data.update({**exc.to_dict()})
                 self.telemetry.emit_event(
                     event=EventPayload(
                         event_name=EventEnum.OBSERVER_FAILED,
+                        namespace=namespace,
+                        workload=workload,
                         phase=ExecutionPhase.OBSERVER,
                         data=data,
                         error=exc.__class__.__name__,
@@ -155,42 +162,46 @@ class ObserverContext:
         if not self._task:
             return
 
-        if self.spec.config.grace_period_seconds > 0:
+        if self.scenario.observer.config.grace_period_seconds > 0:
             logger.info(
                 "Observer %s continuing for grace period: %s seconds",
-                self.spec.name,
-                self.spec.config.grace_period_seconds,
+                self.scenario.observer.name,
+                self.scenario.observer.config.grace_period_seconds,
             )
-            await asyncio.sleep(self.spec.config.grace_period_seconds)
+            await asyncio.sleep(self.scenario.observer.config.grace_period_seconds)
 
-        logger.info("Stopping observer: %s", self.spec.name)
+        logger.info("Stopping observer: %s", self.scenario.observer.name)
         self._task.cancel()
 
         try:
             await self._task
         except asyncio.CancelledError:
-            logger.debug("Observer task %s cancelled", self.spec.name)
+            logger.debug("Observer task %s cancelled", self.scenario.observer.name)
         finally:
+            scenario_ctx: ResiliencyScenario = get_context("scenario")
+            namespace = scenario_ctx.template.namespace
+            workload = scenario_ctx.template.workload
             self.telemetry.emit_event(
                 event=EventPayload(
                     event_name=EventEnum.OBSERVER_STOPPED,
+                    namespace=namespace,
+                    workload=workload,
                     phase=ExecutionPhase.OBSERVER,
-                    data={"observer": self.spec.name},
+                    data={"observer": self.scenario.observer.name},
                 )
             )
 
     async def __aenter__(self) -> "ObserverContext":
         """Enter the async context and start the observer."""
-        scenario: ResiliencyScenario = get_context("scenario")
         self.telemetry = get_context("telemetry")
-        self.spec = scenario.observer
+        self.scenario = get_context("scenario")
         await self.start()
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
         """Exit the async context and stop the observer gracefully."""
         await self.stop()
-        self.spec, self.telemetry, self._task = None, None, None
+        self.scenario, self.telemetry, self._task = None, None, None
 
 
 ScenarioContext = scenario_context
