@@ -1,90 +1,293 @@
 import logging
+import math
+from typing import Optional
 
-from reslib.k8s.client import KubernetesClient
-from reslib.k8s.schema import WorkloadState
-from reslib.k8s.utils import get_workload
-from reslib.schemas.hpa import HpaCPUStressArgsTemplate
-from reslib.validators.hpa import (
-    ensure_hpa_exists,
-    ensure_not_at_max_replicas,
-    validate_hpa_resource_metric,
-    validate_pods_to_stress_cpu,
+from reslib.constants import SUPPORTED_HPA_METRIC_SOURCES, SUPPORTED_HPA_RESOURCE_TYPES
+from reslib.core.context import get_context
+from reslib.exceptions import NotSupportedError
+from reslib.k8s.exceptions import (
+    HpaMetricsNotFoundError,
+    HpaNotConfiguredError,
+    PodsToStressExceededError,
+    WorkloadAtMaxError,
 )
-from reslib.validators.metrics import ensure_metrics_server_available
-from reslib.validators.workload import ensure_workload_steady
+from reslib.k8s.schema import HPAMetricSpec, WorkloadState
+from reslib.k8s.utils import (
+    calculate_hpa_trigger,
+    get_hpa_resource_metric,
+)
+from reslib.schemas.scenario import ResiliencyScenario
 
 logger = logging.getLogger(__name__)
 
 
-async def validate_hpa_cpu_scaling_guardrail(**kwargs) -> None:
+async def validate_metric_and_resource() -> None:
     """
-    Guardrail to validate that a Kubernetes workload is ready for HPA scaling
-    experiments.
+    Validate that the requested HPA metric source and resource type are supported.
 
-    This guardrail performs the following checks in sequence:
-    1. Resolves the workload object from the cluster.
-    2. Ensures the workload is in a steady state (ready, not reconciling, not faulty).
-    3. Confirms that HPA is configured for the workload.
-    4. Checks that the workload is not already at its HPA maximum replica count.
+    This is a guardrail that blocks unsupported combinations early, before any
+    HPA inspection or scaling logic runs.
 
     Raises:
-        WorkloadStatusUnavailableError: If the workload status is unavailable.
-        WorkloadReconcilingError: If the workload is currently reconciling.
-        WorkloadNotAvailableError: If the workload is not available/stable.
-        WorkloadFaultyError: If the workload is faulty.
-        HpaNotConfiguredError: If HPA is not configured for the workload.
-        WorkloadAtMaxError: If the workload has already reached its HPA max replicas.
-
-    Args:
-        **kwargs: Arguments matching HpaScalingGuardrailArgs
-            - namespace (str): Kubernetes namespace of the workload.
-            - workload (str): Name of the workload.
-            - metric_source (HpaMetricSourceEnum): Type of HPA metric.
-            - resource (HpaResourceTypeEnum): Resource name (CPU, memory).
-
-    Returns:
-        None
+        BaseError:
+            If the metric source or resource type is not in the supported sets.
     """
-    logger.info("Validating hpa cpu scaling guardrail")
-    # Parse arguments
-    args = HpaCPUStressArgsTemplate(**kwargs)
-    k8s = KubernetesClient()
+    scenario: ResiliencyScenario = get_context("scenario")
+    namespace = scenario.template.namespace
+    workload_name = scenario.template.workload
 
-    # Discover the workload in the cluster
-    workload: WorkloadState = get_workload(namespace=args.namespace, name=args.workload)
+    if scenario.template.metric_source not in SUPPORTED_HPA_METRIC_SOURCES:
+        raise NotSupportedError(
+            error_code="HPA_METRIC_SOURCE_NOT_SUPPORTED",
+            message="Requested HPA metric source is not supported for scaling tests.",
+            namespace=namespace,
+            workload=workload_name,
+            context={
+                "rule": "metric_source in SUPPORTED_HPA_METRIC_SOURCES",
+                "inputs": {
+                    "metric_source": scenario.template.metric_source.value,
+                    "resource_type": scenario.template.resource_type.value,
+                },
+                "observed": {
+                    "metric_source": scenario.template.metric_source.value,
+                    "supported_metric_sources": [
+                        m.value for m in SUPPORTED_HPA_METRIC_SOURCES
+                    ],
+                },
+            },
+            fix_hint=(
+                "Choose a supported `metric_source` from `supported_metric_sources`, "
+                "or implement support for this metric source."
+            ),
+            retryable=False,
+        )
 
-    # Ensure the workload is steady (ready, not reconciling, not faulty)
-    ensure_workload_steady(workload=workload)
+    if scenario.template.resource_type not in SUPPORTED_HPA_RESOURCE_TYPES:
+        raise NotSupportedError(
+            error_code="HPA_RESOURCE_TYPE_NOT_SUPPORTED",
+            message="Requested HPA resource type is not supported for scaling tests.",
+            namespace=namespace,
+            workload=workload_name,
+            context={
+                "rule": "resource_type in SUPPORTED_HPA_RESOURCE_TYPES",
+                "inputs": {
+                    "metric_source": scenario.template.metric_source.value,
+                    "resource_type": scenario.template.resource_type.value,
+                },
+                "observed": {
+                    "resource_type": scenario.template.resource_type.value,
+                    "supported_resource_types": [
+                        r.value for r in SUPPORTED_HPA_RESOURCE_TYPES
+                    ],
+                },
+            },
+            fix_hint=(
+                "Choose a supported `resource_type` from `supported_resource_types`, "
+                "or implement support for this resource type."
+            ),
+            retryable=False,
+        )
 
-    # Ensure HPA is configured
-    ensure_hpa_exists(workload=workload)
 
-    # Check if hpa scaling behaviour / resource is supported
-    validate_hpa_resource_metric(
+async def validate_hpa_resource_metric() -> None:
+    """
+    Validate that the workload HPA defines the requested metric and resource type.
+
+    This function parses `HPAResourceMetricSchema` from kwargs, then searches the
+    workload's HPA spec for a matching resource metric (e.g., CPU or memory).
+
+    Raises:
+        BaseError:
+            If the workload does not have an HPA configured or if the requested
+            metric/resource type is not present in the HPA spec.
+    """
+    workload: WorkloadState = get_context("workload")
+    scenario: ResiliencyScenario = get_context("scenario")
+    namespace = scenario.template.namespace
+    workload_name = scenario.template.workload
+
+    hpa_metric: Optional[HPAMetricSpec] = get_hpa_resource_metric(
         hpa=workload.spec.hpa,
-        metric_source=args.metric_source,
-        resource_type=args.resource_type,
+        metric_source=scenario.template.metric_source,
+        resource_type=scenario.template.resource_type,
     )
 
-    # Make sure we don't stress pod that can cause downtime
-    validate_pods_to_stress_cpu(
-        workload=workload,
-        metric_source=args.metric_source,
-        resource_type=args.resource_type,
-        idle_cpu_pct=args.idle_cpu_pct,
-        pod_cpu_stress_threshold_pct=args.pod_cpu_stress_threshold_pct,
-        min_pods_idle_pct=args.min_pods_idle_pct,
+    if hpa_metric is None:
+        raise HpaMetricsNotFoundError(
+            error_code="HPA_METRIC_NOT_FOUND",
+            message="Requested HPA metric was not found in the HPA specification.",
+            namespace=namespace,
+            workload=workload_name,
+            context={
+                "rule": "HPA defines a metric matching (metric_source, resource_type)",
+                "inputs": {
+                    "metric_source": scenario.template.metric_source.value,
+                    "resource_type": scenario.template.resource_type.value,
+                },
+                "observed": {
+                    "match_found": False,
+                },
+            },
+            fix_hint=(
+                "Update the HPA to include the requested resource metric, "
+                "or change `metric_source` / `resource_type` to one that exists."
+            ),
+            retryable=False,
+        )
+
+    return None
+
+
+async def ensure_hpa_exists() -> None:
+    """
+    Ensure that a workload has an HPA configured.
+
+    Raises:
+        HpaNotConfiguredError: If no HPA is configured for the workload.
+    """
+    workload: WorkloadState = get_context("workload")
+    scenario: ResiliencyScenario = get_context("scenario")
+    namespace = scenario.template.namespace
+    workload_name = scenario.template.workload
+    if not workload.spec.hpa:
+        raise HpaNotConfiguredError(
+            error_code="HPA_NOT_CONFIGURED",
+            message="Workload does not have an HPA configuration.",
+            namespace=namespace,
+            workload=workload_name,
+            context={
+                "rule": "workload.spec.hpa is None",
+                "inputs": {},
+                "observed": {"hpa_present": False},
+            },
+            fix_hint=(
+                "Enable/configure an HPA for this workload before "
+                "validating HPA metrics."
+            ),
+            retryable=False,
+        )
+    return None
+
+
+async def ensure_hpa_not_at_max_replicas() -> None:
+    """
+    Validate that the workload is not already at the HPA maximum replicas.
+
+    If the workload has no HPA configured, this guardrail is a no-op.
+    Otherwise, it compares the current ready replicas to the HPA maximum
+    and blocks further disruption if the workload is already at max.
+
+    Raises:
+        WorkloadAtMaxError:
+            If the workload is already at the HPA maximum replica count.
+    """
+    workload: WorkloadState = get_context("workload")
+    scenario: ResiliencyScenario = get_context("scenario")
+    namespace = scenario.template.namespace
+    workload_name = scenario.template.workload
+    if not workload.spec.hpa:
+        return None
+
+    ready = workload.status.ready_replicas
+    max_replicas = workload.spec.hpa.max_replicas
+    if ready >= max_replicas:
+        raise WorkloadAtMaxError(
+            error_code="WORKLOAD_AT_HPA_MAX_REPLICAS",
+            message="Workload is already at or above the HPA maximum replicas.",
+            namespace=namespace,
+            workload=workload_name,
+            context={
+                "rule": "ready_replicas < hpa.max_replicas",
+                "inputs": {
+                    "hpa_max_replicas": max_replicas,
+                },
+                "observed": {
+                    "ready_replicas": ready,
+                    "at_or_above_max": True,
+                },
+                "required": {
+                    "hpa_max_replicas": max_replicas,
+                },
+            },
+            fix_hint=(
+                "Reduce load or increase `hpa.maxReplicas` before "
+                "running this operation, because the workload cannot scale up further."
+            ),
+            retryable=True,
+        )
+    return None
+
+
+async def validate_pods_to_stress_cpu() -> None:
+    """
+    Validate that the computed number of pods to stress stays within
+    the configured safety limits.
+
+    This guardrail uses HPA metrics and CPU thresholds to determine how
+    many pods should be stressed, then ensures that enough pods remain
+    idle based on the configured minimum idle percentage.
+
+    Raises:
+        PodsToStressExceededError:
+            If the calculated number of pods to stress exceeds the safety
+            limit derived from the minimum idle pod requirement.
+    """
+
+    workload: WorkloadState = get_context("workload")
+    scenario: ResiliencyScenario = get_context("scenario")
+    namespace = scenario.template.namespace
+    workload_name = scenario.template.workload
+
+    hpa_metric = get_hpa_resource_metric(
+        hpa=workload.spec.hpa,
+        metric_source=scenario.template.metric_source,
+        resource_type=scenario.template.resource_type,
     )
 
-    # Ensure workload is not already at HPA max replicas
-    ensure_not_at_max_replicas(workload=workload)
-
-    # Make sure metrics server is available
-    ensure_metrics_server_available(
-        workload_spec=workload.spec, k8s=k8s, namespace=args.namespace
+    pods_to_stress, _ = calculate_hpa_trigger(
+        status=workload.status,
+        metric=hpa_metric,
+        idle_cpu_pct=scenario.template.idle_cpu_pct,
+        cpu_stress_threshold_pct=scenario.template.cpu_stress_threshold_pct,
     )
 
-    # Ensure there is enough space to scale
-    # TODO: This need cluster role binding
-    # validate_can_deployment_scale(k8s=k8s, deployment=deployment, replicas_to_add=1)
-    logger.info("HPA cpu scaling guardrail success")
+    min_idle_pods_count = math.ceil(
+        workload.status.ready_replicas * scenario.template.min_idle_pct / 100
+    )
+    max_pods_can_stress = workload.status.ready_replicas - min_idle_pods_count
+
+    if pods_to_stress > max_pods_can_stress:
+        raise PodsToStressExceededError(
+            error_code="PODS_TO_STRESS_EXCEEDS_IDLE_SAFETY_LIMIT",
+            message="Calculated number of pods to stress exceeds allowed safety limit.",
+            namespace=namespace,
+            workload=workload_name,
+            context={
+                "rule": "pods_to_stress <= " "ready_replicas - required_idle_pods",
+                "inputs": {
+                    "idle_cpu_pct": scenario.template.idle_cpu_pct,
+                    "cpu_stress_threshold_pct": (
+                        scenario.template.cpu_stress_threshold_pct
+                    ),
+                    "min_idle_pct": scenario.template.min_idle_pct,
+                    "metric_source": scenario.template.metric_source.value,
+                    "resource_type": scenario.template.resource_type.value,
+                },
+                "observed": {
+                    "ready_replicas": workload.status.ready_replicas,
+                    "pods_to_stress": pods_to_stress,
+                    "required_idle_pods": min_idle_pods_count,
+                },
+                "required": {
+                    "max_allowed_pods_to_stress": max_pods_can_stress,
+                },
+            },
+            fix_hint=(
+                "Increase `min_idle_pct`, reduce "
+                "`cpu_stress_threshold_pct`, or scale the workload "
+                "to allow more pods to remain idle."
+            ),
+            retryable=True,
+        )
+
+    return None

@@ -1,24 +1,16 @@
 from typing import Any, Dict, List
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from reslib.runtime.phases import ExecutionPhase
+from reslib.schemas.templates import (
+    SCENARIO_TEMPLATES_MAPPING,
+    HPAScaleStressCPUScenarioTemplate,
+    PodKillScenarioTemplate,
+)
 
 
-class BaseSpec(BaseModel):
-    """
-    Base specification for a scenario step with a function name
-    and optional step-specific overrides.
-    """
-
-    name: str = Field(..., description="Name of the callable or function to execute.")
-    overrides: Dict[str, Any] = Field(
-        default_factory=dict,
-        description="Step-specific overrides merged with the scenario template.",
-    )
-
-
-class StepSpec(BaseSpec):
+class StepSpec(BaseModel):
     """
     Represents a single step in a scenario.
 
@@ -29,6 +21,10 @@ class StepSpec(BaseSpec):
     """
 
     type: ExecutionPhase = Field(..., description="Type of the step in the scenario.")
+    name: str = Field(..., description="Name of the callable or function to execute.")
+    kwargs: Dict[str, Any] = Field(
+        default_factory=dict, description="Arguments passed to the callable."
+    )
 
 
 class ObserverConfig(BaseModel):
@@ -41,13 +37,22 @@ class ObserverConfig(BaseModel):
     """
 
     sampling_interval_seconds: int = Field(
-        default=5, ge=1, description="Interval between observer samples in seconds."
+        default=5,
+        ge=1,
+        le=10,
+        description="Interval between observer samples in seconds.",
     )
     warmup_period_seconds: int = Field(
-        default=0, description="Initial warmup period before measurements in seconds."
+        default=0,
+        ge=0,
+        le=20,
+        description="Initial warmup period before measurements in seconds.",
     )
     grace_period_seconds: int = Field(
-        default=0, description="Grace period to allow system stabilization in seconds."
+        default=0,
+        ge=0,
+        le=20,
+        description="Grace period to allow system stabilization in seconds.",
     )
 
 
@@ -79,9 +84,14 @@ class ResiliencyScenario(BaseModel):
     - `observer`: monitoring configuration
     """
 
-    template: Dict[str, Any] = Field(
-        default_factory=dict,
-        description="Scenario-specific template fields merged into all steps.",
+    model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
+
+    name: str = Field(..., description="Name of the scenario template.")
+    title: str = Field(..., description="Title of the scenario template.")
+    description: str = Field(..., description="Description of the scenario template.")
+    template: PodKillScenarioTemplate | HPAScaleStressCPUScenarioTemplate = Field(
+        ...,
+        description="Scenario-specific template fields.",
     )
     steps: List[StepSpec] = Field(
         ..., description="Ordered list of steps (guardrail/action/rollback)."
@@ -89,3 +99,36 @@ class ResiliencyScenario(BaseModel):
     observer: ObserverSpec = Field(
         ..., description="Observer configuration to monitor system behavior."
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def validate_and_cast_template(cls, values: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Dynamically select and validate the scenario template model based on `name`.
+
+        This validator executes before standard model validation. It inspects
+        the `name` field to determine which concrete template model should be
+        used (e.g. PodKillScenarioTemplate, HPAScaleStressCPUScenarioTemplate).
+
+        The raw `template` dictionary is then validated against the selected
+        template model and replaced with a strongly-typed instance.
+
+        This ensures:
+            - Strict schema validation per scenario type
+            - No acceptance of arbitrary or mismatched template fields
+            - Clear error reporting for unsupported scenario types
+            - Consistent typing of `template` across the system
+
+        Raises:
+            ValueError:
+                - If the scenario type is not registered
+        """
+        scenario_name: str = values.get("name")
+        template_data: Dict[str, Any] = values.get("template")
+        template_model = SCENARIO_TEMPLATES_MAPPING.get(scenario_name)
+
+        if not template_model:
+            raise ValueError(f"Scenario template {scenario_name} not found.")
+
+        values["template"] = template_model.model_validate(template_data)
+        return values

@@ -3,7 +3,7 @@ import math
 from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple
 
-from kubernetes.client import V1Deployment, V1Node, V1Pod, V2HorizontalPodAutoscaler
+from kubernetes.client import V1Deployment, V1Pod, V2HorizontalPodAutoscaler
 from kubernetes.client.exceptions import ApiException
 
 from reslib.config import config
@@ -20,6 +20,7 @@ from reslib.constants import (
     HpaResourceTypeEnum,
     K8DeploymentKind,
 )
+from reslib.core.context import get_context
 from reslib.k8s.client import KubernetesClient
 from reslib.k8s.exceptions import (
     ContainerCrashedError,
@@ -302,8 +303,25 @@ def get_workload(
     except ApiException as exc:
         if exc.status == 404:
             raise WorkloadNotFound(
-                "Deployment not found",
-                context={"deployment": name, "namespace": namespace},
+                error_code="WORKLOAD_NOT_FOUND",
+                message="Requested workload deployment was not found.",
+                namespace=namespace,
+                workload=name,
+                context={
+                    "rule": "deployment exists in namespace",
+                    "inputs": {
+                        "deployment": name,
+                        "namespace": namespace,
+                    },
+                    "observed": {
+                        "deployment_found": False,
+                    },
+                },
+                fix_hint=(
+                    "Verify the deployment name and namespace, or ensure the workload "
+                    "has been created before running this operation."
+                ),
+                retryable=False,
             )
         raise
 
@@ -432,7 +450,7 @@ def calculate_hpa_trigger(
     status: WorkloadStatus,
     metric: HPAMetricSpec,
     idle_cpu_pct: int,
-    pod_cpu_stress_threshold_pct: Optional[int] = 95,
+    cpu_stress_threshold_pct: Optional[int] = 95,
 ) -> Tuple[int, int]:
     """
     Calculate the minimal number of pods and CPU percentage per pod to trigger HPA.
@@ -441,7 +459,7 @@ def calculate_hpa_trigger(
         status: Current workload status with ready replicas.
         metric: HPA CPU metric specification.
         idle_cpu_pct: Current CPU usage when idle (baseline).
-        pod_cpu_stress_threshold_pct: Maximum allowable CPU load per pod (default 95%).
+        cpu_stress_threshold_pct: Maximum allowable CPU load per pod (default 95%).
 
     Returns:
         Tuple[pods_to_stress, stress_cpu_percent]
@@ -449,12 +467,31 @@ def calculate_hpa_trigger(
     Raises:
         HpaNotConfiguredError: If HPA metric lacks 'averageUtilization'.
     """
+    scenario = get_context("scenario")
     target: dict = metric.resource.get("target", {})
     average_utilization = target.get("average_utilization")
 
     if average_utilization is None:
         raise HpaNotConfiguredError(
-            "Missing 'averageUtilization' or HPA is misconfigured."
+            error_code="HPA_AVERAGE_UTILIZATION_MISSING",
+            message="HPA metric configuration is missing averageUtilization target.",
+            namespace=scenario.template.namespace,
+            workload=scenario.template.workload,
+            context={
+                "rule": "HPA metric.resource.target.averageUtilization must be defined",
+                "inputs": {
+                    "metric_type": getattr(metric, "type", "resource"),
+                },
+                "observed": {
+                    "average_utilization": None,
+                    "metric_target": metric.resource.get("target", {}),
+                },
+            },
+            fix_hint=(
+                "Configure the HPA resource metric with "
+                "`target.averageUtilization` before running CPU stress tests."
+            ),
+            retryable=False,
         )
 
     replicas = status.ready_replicas
@@ -464,11 +501,11 @@ def calculate_hpa_trigger(
     for pods_to_stress in range(1, replicas + 1):
         stress_percent = idle_cpu_pct + total_required_cpu_increase / pods_to_stress
         stress_percent = math.ceil(stress_percent)
-        if stress_percent <= pod_cpu_stress_threshold_pct:
+        if stress_percent <= cpu_stress_threshold_pct:
             return pods_to_stress, stress_percent
 
     # If even all pods at max stress cannot reach target
-    return replicas, pod_cpu_stress_threshold_pct
+    return replicas, cpu_stress_threshold_pct
 
 
 def get_hpa_current_average_utilization(
@@ -512,12 +549,30 @@ def raise_on_container_fail(
             # Check for waiting state with abnormal reasons
             if state.waiting and state.waiting.reason not in POD_WAITING_REASONS_OK:
                 raise ContainerCrashedError(
-                    "Pod container is waiting unexpectedly",
+                    error_code="CONTAINER_WAITING_UNEXPECTED",
+                    message="Container entered an unexpected waiting state.",
+                    namespace=namespace,
+                    workload=workload_spec.name,
                     context={
-                        "container": container_name,
-                        "pod": pod_name,
-                        "reason": state.waiting.reason,
+                        "rule": (
+                            "container waiting reason must be in allowed waiting states"
+                        ),
+                        "inputs": {
+                            "namespace": namespace,
+                            "workload": workload_spec.name,
+                        },
+                        "observed": {
+                            "pod": pod_name,
+                            "container": container_name,
+                            "waiting_reason": state.waiting.reason,
+                        },
                     },
+                    fix_hint=(
+                        "Inspect pod events and container logs to determine why the "
+                        "container is blocked (e.g., ImagePullBackOff, "
+                        "CrashLoopBackOff)."
+                    ),
+                    retryable=False,
                 )
 
             # Check for terminated state with abnormal reasons
@@ -526,12 +581,31 @@ def raise_on_container_fail(
                 and state.terminated.reason not in POD_TERMINATED_REASONS_OK
             ):
                 raise ContainerCrashedError(
-                    "Pod terminated unexpectedly",
+                    error_code="CONTAINER_TERMINATED_UNEXPECTED",
+                    message="Container terminated with an unexpected exit condition.",
+                    namespace=namespace,
+                    workload=workload_spec.name,
                     context={
-                        "container": container_name,
-                        "pod": pod,
-                        "reason": state.terminated.reason,
+                        "rule": (
+                            "container termination reason must be "
+                            "allowed and exit_code == 0"
+                        ),
+                        "inputs": {
+                            "namespace": namespace,
+                            "workload": workload_spec.name,
+                        },
+                        "observed": {
+                            "pod": pod_name,
+                            "container": container_name,
+                            "termination_reason": state.terminated.reason,
+                            "exit_code": state.terminated.exit_code,
+                        },
                     },
+                    fix_hint=(
+                        "Check container logs and recent deployment changes. "
+                        "Restart or roll back the workload if crashes persist."
+                    ),
+                    retryable=False,
                 )
 
 
@@ -564,12 +638,23 @@ def raise_on_hpa_scale(
             name=workload.spec.hpa.name, namespace=namespace
         )
         raise HpaScaledError(
-            "HPA scaled: replicas increased",
+            error_code="HPA_SCALE_DETECTED",
+            message="Workload replicas increased due to HPA scaling.",
+            namespace=namespace,
+            workload=workload.spec.name,
             context={
-                "before_replicas": start_replicas,
-                "after_replicas": current_replicas,
-                "average_utilization": get_hpa_current_average_utilization(hpa=hpa),
+                "rule": "current_ready_replicas <= initial_ready_replicas",
+                "inputs": {
+                    "workload_name": workload.spec.name,
+                    "namespace": namespace,
+                },
+                "observed": {
+                    "before_replicas": start_replicas,
+                    "after_replicas": current_replicas,
+                    "average_utilization": get_hpa_current_average_utilization(hpa=hpa),
+                },
             },
+            retryable=False,
         )
 
     return None
@@ -606,13 +691,27 @@ def raise_on_desired_replicas(
 
     if ready_replicas >= desired_replicas:
         raise ReachedDesiredReplicaError(
-            "Deployment has reached the desired number of replicas",
+            error_code="DESIRED_REPLICA_COUNT_REACHED",
+            message="Deployment has reached or exceeded the desired replica count.",
+            namespace=namespace,
+            workload=workload_name,
             context={
-                "deployment": workload_name,
-                "namespace": namespace,
-                "ready_replicas": ready_replicas,
-                "desired_replicas": desired_replicas,
+                "rule": "ready_replicas < desired_replicas",
+                "inputs": {
+                    "deployment": workload_name,
+                    "namespace": namespace,
+                },
+                "observed": {
+                    "ready_replicas": ready_replicas,
+                    "desired_replicas": desired_replicas,
+                    "at_or_above_desired": True,
+                },
             },
+            fix_hint=(
+                "Stop waiting for additional replicas. The deployment has already "
+                "reached the desired state."
+            ),
+            retryable=False,
         )
 
 
@@ -660,65 +759,33 @@ def raise_on_replicas_restored_cpu(
         and current_average_utilization < stress_average_utilization
     ):
         raise ReplicasRestoredError(
-            "Workload replicas have stabilized after HPA stress test.",
+            error_code="HPA_REPLICAS_RESTORED",
+            message=(
+                "Workload replicas have stabilized following CPU "
+                "stress-induced scaling."
+            ),
+            namespace=namespace,
+            workload=initial_workload_state.spec.name,
             context={
-                "namespace": namespace,
-                "deployment": initial_workload_state.spec.name,
-                "current_replicas": current_replicas,
-                "desired_replicas": desired_replicas,
-                "stress_average_utilization": stress_average_utilization,
-                "current_average_utilization": current_average_utilization,
+                "rule": (
+                    "desired_replicas and ready_replicas fall below "
+                    "stress peak replicas and CPU utilization decreases"
+                ),
+                "inputs": {
+                    "deployment": initial_workload_state.spec.name,
+                    "namespace": namespace,
+                },
+                "observed": {
+                    "peak_replicas_during_stress": max_replicas_on_stress,
+                    "current_ready_replicas": current_replicas,
+                    "current_desired_replicas": desired_replicas,
+                    "stress_average_utilization": stress_average_utilization,
+                    "current_average_utilization": current_average_utilization,
+                },
             },
+            fix_hint=(
+                "HPA scale-down stabilization detected. "
+                "CPU stress recovery phase is complete."
+            ),
+            retryable=False,
         )
-
-
-def is_node_tolerated(node: V1Node, deployment: V1Deployment) -> bool:
-    """
-    Check if a pod with the deployment's tolerations can be scheduled on the node.
-
-    Returns True if all node taints are tolerated.
-    """
-    if not node.spec.taints:
-        return True  # No taints to worry about
-
-    for taint in node.spec.taints:
-        # If no toleration matches this taint, node is not tolerated
-        tolerated = any(
-            (not tol.effect or tol.effect == taint.effect)
-            and (
-                (tol.operator == "Exists" and (tol.key == taint.key or tol.key is None))
-                or (
-                    tol.operator == "Equal"
-                    and tol.key == taint.key
-                    and tol.value == taint.value
-                )
-            )
-            for tol in deployment.spec.template.spec.tolerations or []
-        )
-        if not tolerated:
-            return False  # Early exit: found an un-tolerated taint
-
-    return True  # All taints tolerated
-
-
-def get_schedulable_nodes(
-    k8s: KubernetesClient, deployment: V1Deployment
-) -> List[V1Node]:
-    """
-    Return only nodes that where pod can be scheduled and match the given toleration.
-
-    Args:
-        k8s: Kubernetes client instance.
-        deployment: Deployment
-
-    Returns:
-        List of schedulable nodes.
-    """
-    schedulable_nodes: List[V1Node] = []
-    for node in k8s.v1_api.list_node().items:
-        if node.spec.unschedulable:
-            continue
-        if is_node_tolerated(node, deployment):
-            schedulable_nodes.append(node)
-
-    return schedulable_nodes

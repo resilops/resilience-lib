@@ -59,24 +59,24 @@ class EventEnum(str, Enum):
     """
 
     # Guardrail events
-    GUARDRAIL_STARTED: str = "res:reslib:event:guardrail:started"
-    GUARDRAIL_SUCCESS: str = "res:reslib:event:guardrail:success"
-    GUARDRAIL_FAILED: str = "res:reslib:event:guardrail:failed"
+    GUARDRAIL_STARTED = "res:reslib:event:guardrail:started"
+    GUARDRAIL_SUCCESS = "res:reslib:event:guardrail:success"
+    GUARDRAIL_FAILED = "res:reslib:event:guardrail:failed"
 
     # Observer events
-    OBSERVER_STARTED: str = "res:reslib:event:observer:started"
-    OBSERVER_STOPPED: str = "res:reslib:event:observer:stopped"
-    OBSERVER_FAILED: str = "res:reslib:event:observer:failed"
+    OBSERVER_STARTED = "res:reslib:event:observer:started"
+    OBSERVER_STOPPED = "res:reslib:event:observer:stopped"
+    OBSERVER_FAILED = "res:reslib:event:observer:failed"
 
     # Action events
-    ACTION_STARTED: str = "res:reslib:event:action:started"
-    ACTION_SUCCESS: str = "res:reslib:event:action:success"
-    ACTION_FAILED: str = "res:reslib:event:action:failed"
+    ACTION_STARTED = "res:reslib:event:action:started"
+    ACTION_SUCCESS = "res:reslib:event:action:success"
+    ACTION_FAILED = "res:reslib:event:action:failed"
 
     # Rollback events
-    ROLLBACK_STARTED: str = "res:reslib:event:rollback:started"
-    ROLLBACK_SUCCESS: str = "res:reslib:event:rollback:success"
-    ROLLBACK_FAILED: str = "res:reslib:event:rollback:failed"
+    ROLLBACK_STARTED = "res:reslib:event:rollback:started"
+    ROLLBACK_SUCCESS = "res:reslib:event:rollback:success"
+    ROLLBACK_FAILED = "res:reslib:event:rollback:failed"
 
 
 class MetricsEnum(str, Enum):
@@ -93,3 +93,7 @@ class MetricsEnum(str, Enum):
 
 
 AsyncFunc = Callable[..., Awaitable[None]]
+
+
+POD_KILL_SCENARIO_TEMPLATE: str = "POD_KILL"
+HPA_SCALE_ON_CPU_STRESS_SCENARIO_TEMPLATE: str = "HPA_SCALE_ON_CPU_STRESS"

@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Dict, Optional
+from typing import Optional
 
 from kubernetes import config as k8sconfig
 
@@ -7,6 +7,9 @@ from reslib import helpers as h
 from reslib.config import config
 from reslib.constants import AsyncFunc, EventEnum
 from reslib.core.context import ObserverContext, ScenarioContext, get_context
+from reslib.exceptions import BaseError
+from reslib.k8s.schema import WorkloadState
+from reslib.k8s.utils import get_workload
 from reslib.logging import setup_logging
 from reslib.runtime import resolve as resolver
 from reslib.runtime.phases import ExecutionPhase
@@ -37,7 +40,6 @@ def _lib_setup() -> None:
 
 async def _execute_phase(
     *,
-    scenario: ResiliencyScenario,
     phase: ExecutionPhase,
     start_event: EventEnum,
     success_event: EventEnum,
@@ -54,45 +56,62 @@ async def _execute_phase(
       5. Re-raises exceptions for caller handling.
 
     Args:
-        scenario: Resiliency scenario containing template and steps.
         phase: The phase to execute (guardrail, action, rollback).
         start_event: Event recorded on execution phase start.
         success_event: Event recorded on successful execution.
         failure_event: Event recorded on failure.
     """
-    telemetry = get_context("telemetry")
+    telemetry: h.BaseTelemetry = get_context("telemetry")
+    scenario: ResiliencyScenario = get_context("scenario")
+
     telemetry.emit_event(
         event=EventPayload(
             event_name=start_event,
+            namespace=scenario.template.workload,
+            workload=scenario.template.workload,
             phase=phase,
             details=f"Phase: {phase.value} execution started",
         )
     )
-    results: Dict[str, Any] = {}
 
     for step in filter(lambda s: s.name and s.type == phase, scenario.steps):
         try:
             func: AsyncFunc = resolver.resolve(phase=step.type, name=step.name)
-            result = await func(**scenario.template, **step.overrides)
-            results[step.name] = result
-        except Exception as exc:
-            results[step.name] = getattr(exc, "context", None)
+            result = await func(**step.kwargs)
+            telemetry.emit_event(
+                event=EventPayload(
+                    event_name=success_event,
+                    namespace=scenario.template.namespace,
+                    workload=scenario.template.workload,
+                    phase=phase,
+                    data=result,
+                )
+            )
+        except BaseError as exc:
             telemetry.emit_event(
                 event=EventPayload(
                     event_name=failure_event,
+                    namespace=scenario.template.namespace,
+                    workload=scenario.template.workload,
                     phase=phase,
                     details=str(exc),
                     error=exc.__class__.__name__,
-                    return_data=results,
+                    data=exc.to_dict(),
                 )
             )
-            logger.exception("Error executing the phase", extra={"phase": phase})
-            raise exc
-
-    # Success
-    telemetry.emit_event(
-        event=EventPayload(event_name=success_event, phase=phase, return_data=results)
-    )
+            raise
+        except Exception as exc:
+            telemetry.emit_event(
+                event=EventPayload(
+                    event_name=failure_event,
+                    namespace=scenario.template.namespace,
+                    workload=scenario.template.workload,
+                    phase=phase,
+                    details=str(exc),
+                    error=exc.__class__.__name__,
+                )
+            )
+            raise
 
 
 async def execute_resilience_scenario(
@@ -120,12 +139,17 @@ async def execute_resilience_scenario(
     """
     _lib_setup()
 
+    workload: WorkloadState = get_workload(
+        namespace=scenario.template.namespace, name=scenario.template.workload
+    )
+
     async with ScenarioContext(
-        scenario=scenario, telemetry=telemetry or h.NoopTelemetry()
+        scenario=scenario,
+        telemetry=telemetry or h.NoopTelemetry(),
+        workload=workload,
     ):
         # 1. Guardrail phase (fatal if validation fails)
         await _execute_phase(
-            scenario=scenario,
             phase=ExecutionPhase.GUARDRAIL,
             start_event=EventEnum.GUARDRAIL_STARTED,
             success_event=EventEnum.GUARDRAIL_SUCCESS,
@@ -135,14 +159,12 @@ async def execute_resilience_scenario(
         # 2. Action and rollback phases with observer context
         async with ObserverContext(resolver=resolver):
             await _execute_phase(
-                scenario=scenario,
                 phase=ExecutionPhase.ACTION,
                 start_event=EventEnum.ACTION_STARTED,
                 success_event=EventEnum.ACTION_SUCCESS,
                 failure_event=EventEnum.ACTION_FAILED,
             )
             await _execute_phase(
-                scenario=scenario,
                 phase=ExecutionPhase.ROLLBACK,
                 start_event=EventEnum.ROLLBACK_STARTED,
                 success_event=EventEnum.ROLLBACK_SUCCESS,

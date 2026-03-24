@@ -10,7 +10,8 @@ from reslib.core.watchdog import watch_task_group
 from reslib.k8s.client import KubernetesClient
 from reslib.k8s.schema import WorkloadStatus
 from reslib.k8s.utils import get_workload_status
-from reslib.schemas.http import HTTPLatencyArgsTemplate
+from reslib.observers.schemas import HTTPLatencyArgsTemplate
+from reslib.schemas.scenario import ResiliencyScenario
 from reslib.schemas.telemetry import MetricsPayload
 
 
@@ -23,17 +24,22 @@ def _emit_metrics(
     """Emit a single observer metric with optional error or latency info."""
 
     telemetry: h.BaseTelemetry = get_context("telemetry")
+    scenario: ResiliencyScenario = get_context("scenario")
 
     metrics = MetricsPayload(
         metrics_name=MetricsEnum.HTTP,
+        namespace=scenario.template.namespace,
+        workload=scenario.template.workload,
         function="measure_endpoint_latency",
-        workload_status=status.model_dump(),
+        workload_status=status,
     )
 
     if timed_response:
-        metrics.status_code = timed_response.response.status_code
-        metrics.latency = timed_response.latency
-        metrics.request_timestamp = timed_response.timestamp
+        metrics.measurement = {
+            "status_code": timed_response.response.status_code,
+            "latency": timed_response.latency,
+            "timestamp": timed_response.timestamp,
+        }
 
     if error:
         metrics.is_error = True
@@ -55,10 +61,11 @@ async def measure_endpoint_latency(**kwargs) -> None:
     Raises:
         WorkloadNotFound, MultipleWorkloadsReturned, TimeoutError, Exception
     """
+    scenario: ResiliencyScenario = get_context("scenario")
     args = HTTPLatencyArgsTemplate(**kwargs)
     k8s = KubernetesClient()
 
-    async with httpx.AsyncClient(timeout=args.http_request_timeout_seconds) as client:
+    async with httpx.AsyncClient(timeout=args.request_timeout_seconds) as client:
         # 1. Build request coroutines
         tasks = [
             (
@@ -71,15 +78,15 @@ async def measure_endpoint_latency(**kwargs) -> None:
         # 2. Execute all tasks concurrently, do not propagate exceptions except timeout
         completed_tasks = await watch_task_group(
             tasks=tasks,
-            timeout=args.http_request_timeout_seconds * args.requests_per_interval,
+            timeout=args.request_timeout_seconds * args.requests_per_interval,
             return_when=asyncio.FIRST_EXCEPTION,
             raise_exception=False,
         )
 
     # Get deployment
     deployment = k8s.apps.read_namespaced_deployment(
-        name=args.workload,
-        namespace=args.namespace,
+        name=scenario.template.workload,
+        namespace=scenario.template.namespace,
     )
 
     # 3. Fetch workload status AFTER requests finish

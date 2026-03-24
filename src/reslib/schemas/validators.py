@@ -3,6 +3,9 @@ import math
 from pydantic import BaseModel, Field, model_validator
 
 from reslib.constants import QuantitySelectionModeEnum
+from reslib.core.context import get_context
+from reslib.exceptions import QuantitySelectionError
+from reslib.schemas.scenario import ResiliencyScenario
 
 
 class QuantitySelection(BaseModel):
@@ -34,7 +37,25 @@ class QuantitySelection(BaseModel):
             - Percentage-based selection must not exceed 100%
         """
         if self.mode == QuantitySelectionModeEnum.PERCENTAGE and self.amount > 100:
-            raise ValueError("Percentage selection cannot exceed 100")
+            scenario: ResiliencyScenario = get_context("scenario")
+            raise QuantitySelectionError(
+                error_code="INVALID_PERCENTAGE_SELECTION",
+                message="Percentage-based quantity selection exceeds allowed limit.",
+                namespace=scenario.template.namespace,
+                workload=scenario.template.workload,
+                context={
+                    "rule": "percentage <= 100",
+                    "inputs": {
+                        "mode": self.mode.value,
+                        "amount": self.amount,
+                    },
+                    "observed": {
+                        "max_allowed_percentage": 100,
+                    },
+                },
+                fix_hint="Provide a percentage value between 1 and 100.",
+                retryable=False,
+            )
         return self
 
     def with_total(self, total: int) -> int:
@@ -51,6 +72,27 @@ class QuantitySelection(BaseModel):
             return math.floor(total * self.amount / 100)
 
         if self.amount > total:
-            raise ValueError("Absolute selection cannot exceed total")
+            scenario: ResiliencyScenario = get_context("scenario")
+            raise QuantitySelectionError(
+                error_code="ABSOLUTE_SELECTION_EXCEEDS_TOTAL",
+                message="Requested absolute quantity exceeds available total.",
+                namespace=scenario.template.namespace,
+                workload=scenario.template.workload,
+                context={
+                    "rule": "amount <= total",
+                    "inputs": {
+                        "amount": self.amount,
+                        "total_available": total,
+                    },
+                    "observed": {
+                        "exceeds_total": True,
+                    },
+                },
+                fix_hint=(
+                    "Reduce the absolute quantity or increase the available "
+                    "replica count before performing the operation."
+                ),
+                retryable=False,
+            )
 
         return self.amount
