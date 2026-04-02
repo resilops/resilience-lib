@@ -4,8 +4,8 @@ from kubernetes.client import V1Deployment
 
 from reslib.k8s.client import KubernetesClient
 from reslib.k8s.schema import (
+    AgentConfigSchema,
     ClusterState,
-    NamespaceListConfig,
     NamespaceState,
     WorkloadState,
 )
@@ -50,7 +50,7 @@ def discover_workloads(
 
 
 def discover_cluster(
-    k8s_client: KubernetesClient, cluster_name: str, ns_config: NamespaceListConfig
+    k8s_client: KubernetesClient, agent_config: AgentConfigSchema
 ) -> ClusterState:
     """
     Discover all namespaces in the cluster and their workloads.
@@ -60,18 +60,17 @@ def discover_cluster(
 
     Args:
         k8s_client: Kubernetes client instance.
-        cluster_name: Cluster name.
-        ns_config: List of namespaces
+        agent_config: Agent config schema.
 
     Yields:
         NamespaceState objects containing workloads for each namespace.
     """
-    cluster_state = ClusterState(name=cluster_name)
+    cluster_state = ClusterState(cluster_id=agent_config.cluster_id)
 
-    for ns in ns_config.namespaces:
-        ns_state = NamespaceState(name=ns.name, title=ns.title)
+    for ns_name in agent_config.namespaces:
+        ns_state = NamespaceState(name=ns_name)
 
-        for workload in discover_workloads(k8s_client, ns.name):
+        for workload in discover_workloads(k8s_client, ns_name):
             ns_state.workloads[workload.spec.name] = workload
 
         cluster_state.namespaces[ns_state.name] = ns_state

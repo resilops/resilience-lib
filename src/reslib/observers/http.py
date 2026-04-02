@@ -37,7 +37,7 @@ def _emit_metrics(
     if timed_response:
         metrics.measurement = {
             "status_code": timed_response.response.status_code,
-            "latency": timed_response.latency,
+            "latency_ms": timed_response.latency,
             "timestamp": timed_response.timestamp,
         }
 
