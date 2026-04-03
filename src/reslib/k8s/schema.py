@@ -76,7 +76,7 @@ class WorkloadSpec(BaseModel):
         default_factory=dict,
         description="Pod labels to select pods belonging to this workload",
     )
-    containers: List[Optional[ContainerSpec]] = Field(
+    containers: List[ContainerSpec] = Field(
         default_factory=list, description="Pod containers"
     )
 
@@ -117,7 +117,7 @@ class WorkloadStatus(BaseModel):
             "Generation of the workload spec currently applied by the controller"
         ),
     )
-    conditions: List[Optional[K8Condition]] = Field(
+    conditions: List[K8Condition] = Field(
         default_factory=list, description="Workload conditions"
     )
 
@@ -134,8 +134,8 @@ class NamespaceState(BaseModel):
     """State of workloads within a namespace."""
 
     name: str = Field(..., description="Namespace name")
-    workloads: Dict[str, WorkloadState] = Field(
-        default_factory=dict, description="Workloads keyed by name"
+    workloads: List[WorkloadState] = Field(
+        default_factory=list, description="Workloads list"
     )
 
 
@@ -143,8 +143,8 @@ class ClusterState(BaseModel):
     """Snapshot of Kubernetes cluster state."""
 
     cluster_id: int = Field(..., description="Cluster ID")
-    namespaces: Dict[str, NamespaceState] = Field(
-        default_factory=dict, description="Namespaces keyed by name"
+    namespaces: List[NamespaceState] = Field(
+        default_factory=list, description="Namespaces list"
     )
 
 

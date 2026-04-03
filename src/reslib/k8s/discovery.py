@@ -71,8 +71,8 @@ def discover_cluster(
         ns_state = NamespaceState(name=ns_name)
 
         for workload in discover_workloads(k8s_client, ns_name):
-            ns_state.workloads[workload.spec.name] = workload
+            ns_state.workloads.append(workload)
 
-        cluster_state.namespaces[ns_state.name] = ns_state
+        cluster_state.namespaces.append(ns_state)
 
     return cluster_state
