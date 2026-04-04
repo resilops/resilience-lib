@@ -1,11 +1,10 @@
-from typing import Generator
+from typing import Generator, List
 
 from kubernetes.client import V1Deployment
 
 from reslib.k8s.client import KubernetesClient
 from reslib.k8s.schema import (
-    ClusterState,
-    DiscoveryConfigSchema,
+    DiscoveryNamespaceConfigSchema,
     NamespaceState,
     WorkloadState,
 )
@@ -41,30 +40,28 @@ def discover_workloads(
         )
 
 
-def discover_cluster(
-    k8s: KubernetesClient, discovery: DiscoveryConfigSchema
-) -> ClusterState:
+def discover_namespaces(config: DiscoveryNamespaceConfigSchema) -> List[NamespaceState]:
     """
-    Discover all namespaces in the cluster and their workloads.
+    Discover given namespaces in the cluster and their workloads.
 
     This function performs a full traversal of the cluster:
     namespaces → workloads.
 
     Args:
-        k8s: Kubernetes client instance.
-        discovery: Agent discovery config schema.
+        config: Agent discovery config schema.
 
     Yields:
         NamespaceState objects containing workloads for each namespace.
     """
-    cluster_state = ClusterState(cluster_id=discovery.cluster_id)
+    k8s = KubernetesClient()
+    namespace_states: List[NamespaceState] = []
 
-    for ns_name in discovery.namespaces:
+    for ns_name in config.namespaces:
         ns_state = NamespaceState(name=ns_name)
 
         for workload in discover_workloads(k8s, ns_name):
             ns_state.workloads.append(workload)
 
-        cluster_state.namespaces.append(ns_state)
+        namespace_states.append(ns_state)
 
-    return cluster_state
+    return namespace_states

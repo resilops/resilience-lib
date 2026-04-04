@@ -125,19 +125,9 @@ class NamespaceState(BaseModel):
     )
 
 
-class ClusterState(BaseModel):
-    """Snapshot of Kubernetes cluster state."""
+class DiscoveryNamespaceConfigSchema(BaseModel):
+    """Agent discovery namespace config schema"""
 
-    cluster_id: int = Field(..., description="Cluster ID")
-    namespaces: List[NamespaceState] = Field(
-        default_factory=list, description="Namespaces list"
-    )
-
-
-class DiscoveryConfigSchema(BaseModel):
-    """Agent config schema"""
-
-    cluster_id: int = Field(..., description="Cluster ID")
     namespaces: List[str] = Field(
         default_factory=list, description="List of namespaces name"
     )
