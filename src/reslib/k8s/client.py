@@ -36,6 +36,11 @@ class KubernetesClient:
             self._api = client.ApiClient()
         return self._api
 
+    @staticmethod
+    def new_api() -> client.ApiClient:
+        """Create a fresh ApiClient instance for one-off calls (e.g. exec/stream)."""
+        return client.ApiClient()
+
     @property
     def v1_api(self) -> client.CoreV1Api:
         if self._v1_api is None:

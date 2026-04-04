@@ -3,7 +3,7 @@ import logging
 import random
 from typing import Any, Awaitable, Dict, List, Optional, Tuple
 
-from kubernetes import stream
+from kubernetes import client, stream
 from kubernetes.client import V1Pod
 
 from reslib.actions.schemas import PodStressSchema
@@ -86,9 +86,10 @@ async def execute_cpu_stress(
 
     stream_resp = None
     try:
+        stream_api = client.CoreV1Api(k8s.new_api())
         stream_resp = await asyncio.to_thread(
             stream.stream,
-            k8s.v1_api.connect_get_namespaced_pod_exec,
+            stream_api.connect_get_namespaced_pod_exec,
             name=pod.metadata.name,
             namespace=pod.metadata.namespace,
             container=container_name,
