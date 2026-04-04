@@ -1,8 +1,8 @@
 import logging
 import math
-from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple
 
+from cachetools import TTLCache, cached
 from kubernetes.client import V1Deployment, V1Pod, V2HorizontalPodAutoscaler
 from kubernetes.client.exceptions import ApiException
 
@@ -19,6 +19,7 @@ from reslib.constants import (
     HpaMetricSourceEnum,
     HpaResourceTypeEnum,
     K8DeploymentKind,
+    WorkloadStatusEnum,
 )
 from reslib.core.context import get_context
 from reslib.k8s.client import KubernetesClient
@@ -38,13 +39,15 @@ from reslib.k8s.schema import (
     PDBConfig,
     ResourceRequirements,
     WorkloadPolicies,
+    WorkloadRuntimeState,
     WorkloadSpec,
     WorkloadState,
-    WorkloadStatus,
 )
 from reslib.k8s.snapshot import NamespaceSnapshot
 
 logger = logging.getLogger(__name__)
+
+_namespace_cache = TTLCache(maxsize=64, ttl=30)  # seconds
 
 
 def get_deployment_conditions(deployment: V1Deployment) -> List[Optional[K8Condition]]:
@@ -152,8 +155,10 @@ def is_deployment_faulty(deployment: V1Deployment) -> bool:
     return False
 
 
-@lru_cache(maxsize=64)
-def get_namespace_snapshot(k8s: KubernetesClient, namespace: str) -> NamespaceSnapshot:
+@cached(_namespace_cache)
+def get_namespace_policies_snapshot(
+    k8s: KubernetesClient, namespace: str
+) -> NamespaceSnapshot:
     """
     Build and cache a snapshot of namespace-scoped workload policies.
 
@@ -185,15 +190,8 @@ def get_namespace_snapshot(k8s: KubernetesClient, namespace: str) -> NamespaceSn
     )
 
 
-def get_workload_spec(
-    snapshot: NamespaceSnapshot, deployment: V1Deployment
-) -> WorkloadSpec:
-    """
-    Build a WorkloadSpec from a Deployment, HPA index and get container resource/limits.
-
-    Used during bulk discovery.
-    """
-    hpa = snapshot.get_hpa(deployment)
+def _build_container_specs(deployment: V1Deployment) -> List[ContainerSpec]:
+    """Build container specs from a deployment pod template."""
     containers: list[ContainerSpec] = []
     pod_spec = deployment.spec.template.spec
 
@@ -211,26 +209,61 @@ def get_workload_spec(
                 ),
             )
         )
+    return containers
+
+
+def _build_hpa_config(
+    deployment: V1Deployment,
+    snapshot: Optional[NamespaceSnapshot],
+) -> Optional[HPAConfig]:
+    """Build HPA config for a deployment from the namespace snapshot."""
+    hpa = snapshot.get_hpa(deployment) if snapshot else None
+    if hpa is None:
+        return None
+
+    return HPAConfig(
+        name=hpa.metadata.name,
+        min_replicas=hpa.spec.min_replicas,
+        max_replicas=hpa.spec.max_replicas,
+        metrics=[
+            HPAMetricSpec(type=m.type, resource=m.resource.to_dict())
+            for m in (hpa.spec.metrics or [])
+        ],
+    )
+
+
+def get_workload_spec(
+    *,
+    deployment: V1Deployment,
+    snapshot: Optional[NamespaceSnapshot] = None,
+    is_full: bool = True,
+) -> WorkloadSpec:
+    """
+    Build a workload specification from a Kubernetes Deployment.
+
+    Args:
+        deployment:
+            Kubernetes Deployment object.
+
+        snapshot:
+            Optional namespace snapshot used to resolve HPA configuration.
+            Only used in `full` mode.
+
+        is_full:
+            Level of detail to include in the returned workload spec.
+
+    Returns:
+        WorkloadSpec:
+            Normalized workload specification derived from the Deployment.
+    """
 
     return WorkloadSpec(
         name=deployment.metadata.name,
         kind=K8DeploymentKind.DEPLOYMENT,
         replicas=deployment.spec.replicas or 0,
-        hpa=(
-            HPAConfig(
-                name=hpa.metadata.name,
-                min_replicas=hpa.spec.min_replicas,
-                max_replicas=hpa.spec.max_replicas,
-                metrics=[
-                    HPAMetricSpec(type=m.type, resource=m.resource.to_dict())
-                    for m in (hpa.spec.metrics or [])
-                ],
-            )
-            if hpa
-            else None
-        ),
-        labels=deployment.spec.selector.match_labels or {},
-        containers=containers,
+        hpa=_build_hpa_config(deployment, snapshot) if is_full else None,
+        labels=deployment.spec.selector.match_labels if is_full else None,
+        containers=_build_container_specs(deployment) if is_full else None,
     )
 
 
@@ -256,16 +289,31 @@ def get_workload_policies(
     )
 
 
-def get_workload_status(deployment: V1Deployment) -> WorkloadStatus:
-    """Build the current WorkloadStatus from a Deployment."""
-    return WorkloadStatus(
+def get_workload_runtime(
+    deployment: V1Deployment, is_full: bool = True
+) -> WorkloadRuntimeState:
+    """Build the current WorkloadRuntimeState from a Deployment."""
+
+    is_available = is_deployment_available(deployment)
+    reconciling = is_deployment_in_progress(deployment)
+    is_faulty = is_deployment_faulty(deployment)
+
+    # Priority-based status resolution
+    if is_faulty:
+        status = WorkloadStatusEnum.degraded
+    elif reconciling:
+        status = WorkloadStatusEnum.reconciling
+    elif not is_available:
+        status = WorkloadStatusEnum.unavailable
+    else:
+        status = WorkloadStatusEnum.healthy
+
+    return WorkloadRuntimeState(
         ready_replicas=deployment.status.ready_replicas or 0,
-        is_available=is_deployment_available(deployment),
-        reconciling=is_deployment_in_progress(deployment),
-        is_faulty=is_deployment_faulty(deployment),
-        spec_generation=deployment.metadata.generation,
-        spec_applied_generation=deployment.status.observed_generation,
-        conditions=get_deployment_conditions(deployment),
+        status=status,
+        generation=deployment.metadata.generation,
+        observed_generation=deployment.status.observed_generation,
+        conditions=get_deployment_conditions(deployment) if is_full else None,
     )
 
 
@@ -293,7 +341,7 @@ def get_workload(
         WorkloadNotFound: If the Deployment does not exist.
     """
     k8s = k8s or KubernetesClient()
-    snapshot = get_namespace_snapshot(k8s=k8s, namespace=namespace)
+    snapshot = get_namespace_policies_snapshot(k8s=k8s, namespace=namespace)
 
     try:
         deployment = k8s.apps.read_namespaced_deployment(
@@ -328,7 +376,7 @@ def get_workload(
     return WorkloadState(
         spec=get_workload_spec(snapshot=snapshot, deployment=deployment),
         policies=get_workload_policies(snapshot=snapshot, deployment=deployment),
-        status=get_workload_status(deployment),
+        runtime=get_workload_runtime(deployment),
     )
 
 
@@ -447,7 +495,7 @@ def get_workload_pods(
 
 
 def calculate_hpa_trigger(
-    status: WorkloadStatus,
+    status: WorkloadRuntimeState,
     metric: HPAMetricSpec,
     idle_cpu_pct: int,
     cpu_stress_threshold_pct: Optional[int] = 95,
@@ -456,7 +504,7 @@ def calculate_hpa_trigger(
     Calculate the minimal number of pods and CPU percentage per pod to trigger HPA.
 
     Args:
-        status: Current workload status with ready replicas.
+        status: Current workload runtime state with ready replicas.
         metric: HPA CPU metric specification.
         idle_cpu_pct: Current CPU usage when idle (baseline).
         cpu_stress_threshold_pct: Maximum allowable CPU load per pod (default 95%).
@@ -630,7 +678,7 @@ def raise_on_hpa_scale(
     deployment = k8s.apps.read_namespaced_deployment(
         name=workload.spec.name, namespace=namespace
     )
-    start_replicas = workload.status.ready_replicas
+    start_replicas = workload.runtime.ready_replicas
     current_replicas = deployment.status.ready_replicas or 0
 
     if current_replicas > start_replicas:

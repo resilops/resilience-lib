@@ -66,7 +66,7 @@ async def ensure_pdb_not_violated(**kwargs) -> None:
     if not disruption_budget:
         raise ValueError("Missing Planned disruption budget")
 
-    ready_replicas = workload.status.ready_replicas or 0
+    ready_replicas = workload.runtime.ready_replicas or 0
     min_available = workload.policies.pdb.min_available
 
     remaining_pods = ready_replicas - disruption_budget

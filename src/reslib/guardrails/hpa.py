@@ -188,7 +188,7 @@ async def ensure_hpa_not_at_max_replicas() -> None:
     if not workload.spec.hpa:
         return None
 
-    ready = workload.status.ready_replicas
+    ready = workload.runtime.ready_replicas
     max_replicas = workload.spec.hpa.max_replicas
     if ready >= max_replicas:
         raise WorkloadAtMaxError(
@@ -245,16 +245,16 @@ async def validate_pods_to_stress_cpu() -> None:
     )
 
     pods_to_stress, _ = calculate_hpa_trigger(
-        status=workload.status,
+        status=workload.runtime,
         metric=hpa_metric,
         idle_cpu_pct=scenario.template.idle_cpu_pct,
         cpu_stress_threshold_pct=scenario.template.cpu_stress_threshold_pct,
     )
 
     min_idle_pods_count = math.ceil(
-        workload.status.ready_replicas * scenario.template.min_idle_pct / 100
+        workload.runtime.ready_replicas * scenario.template.min_idle_pct / 100
     )
-    max_pods_can_stress = workload.status.ready_replicas - min_idle_pods_count
+    max_pods_can_stress = workload.runtime.ready_replicas - min_idle_pods_count
 
     if pods_to_stress > max_pods_can_stress:
         raise PodsToStressExceededError(
@@ -274,7 +274,7 @@ async def validate_pods_to_stress_cpu() -> None:
                     "resource_type": scenario.template.resource_type.value,
                 },
                 "observed": {
-                    "ready_replicas": workload.status.ready_replicas,
+                    "ready_replicas": workload.runtime.ready_replicas,
                     "pods_to_stress": pods_to_stress,
                     "required_idle_pods": min_idle_pods_count,
                 },

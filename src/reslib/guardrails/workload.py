@@ -1,3 +1,4 @@
+from reslib.constants import WorkloadStatusEnum
 from reslib.core.context import get_context
 from reslib.k8s.exceptions import (
     WorkloadFaultyError,
@@ -29,37 +30,37 @@ async def ensure_workload_steady() -> None:
     scenario: ResiliencyScenario = get_context("scenario")
     namespace = scenario.template.namespace
     workload_name = workload.spec.name
-    status = workload.status
+    runtime = workload.runtime
 
-    if not status:
+    if not runtime:
         raise WorkloadStatusUnavailableError(
             error_code="WORKLOAD_STATUS_UNAVAILABLE",
             message=(
-                "Workload status is missing; cannot determine readiness for "
+                "Workload runtime state is missing; cannot determine readiness for "
                 "disruption."
             ),
             namespace=namespace,
             workload=workload_name,
             context={
-                "rule": "workload.status is not None",
+                "rule": "workload.runtime is not None",
                 "inputs": {"workload_name": workload.spec.name},
-                "observed": {"status_present": False},
+                "observed": {"runtime_present": False},
             },
             fix_hint=(
-                "Ensure the workload controller reports status and retry "
-                "once status is available."
+                "Ensure the workload controller reports runtime state and retry "
+                "once runtime state is available."
             ),
             retryable=True,
         )
 
-    if status.reconciling:
+    if runtime.status == WorkloadStatusEnum.reconciling:
         raise WorkloadReconcilingError(
             error_code="WORKLOAD_RECONCILING",
             message="Workload is currently reconciling; disruption is blocked.",
             namespace=namespace,
             workload=workload_name,
             context={
-                "rule": "workload.status.reconciling is False",
+                "rule": "workload.runtime.reconciling is False",
                 "inputs": {"workload_name": workload.spec.name},
                 "observed": {"reconciling": True},
             },
@@ -67,14 +68,14 @@ async def ensure_workload_steady() -> None:
             retryable=True,
         )
 
-    if not status.is_available:
+    if not runtime.status == WorkloadStatusEnum.unavailable:
         raise WorkloadNotAvailableError(
             error_code="WORKLOAD_NOT_AVAILABLE",
             message="Workload is not available/stable; disruption is blocked.",
             namespace=namespace,
             workload=workload_name,
             context={
-                "rule": "workload.status.is_available is True",
+                "rule": "workload.runtime.is_available is True",
                 "inputs": {"workload_name": workload.spec.name},
                 "observed": {"is_available": False},
             },
@@ -85,14 +86,14 @@ async def ensure_workload_steady() -> None:
             retryable=True,
         )
 
-    if status.is_faulty:
+    if runtime.status == WorkloadStatusEnum.degraded:
         raise WorkloadFaultyError(
             error_code="WORKLOAD_FAULTY",
             message="Workload is in a faulty state; disruption is blocked.",
             namespace=namespace,
             workload=workload_name,
             context={
-                "rule": "workload.status.is_faulty is False",
+                "rule": "workload.runtime.is_faulty is False",
                 "inputs": {"workload_name": workload.spec.name},
                 "observed": {"is_faulty": True},
             },

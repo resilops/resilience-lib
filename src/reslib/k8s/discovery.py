@@ -4,21 +4,16 @@ from kubernetes.client import V1Deployment
 
 from reslib.k8s.client import KubernetesClient
 from reslib.k8s.schema import (
-    AgentConfigSchema,
     ClusterState,
+    DiscoveryConfigSchema,
     NamespaceState,
     WorkloadState,
 )
-from reslib.k8s.utils import (
-    get_namespace_snapshot,
-    get_workload_policies,
-    get_workload_spec,
-    get_workload_status,
-)
+from reslib.k8s.utils import get_workload_runtime, get_workload_spec
 
 
 def discover_workloads(
-    k8s_client: KubernetesClient,
+    k8s: KubernetesClient,
     namespace: str,
 ) -> Generator[WorkloadState, None, None]:
     """
@@ -29,28 +24,25 @@ def discover_workloads(
     each Deployment in the namespace.
 
     Args:
-        k8s_client: Kubernetes client instance.
+        k8s: Kubernetes client instance.
         namespace: Namespace to search in.
 
     Yields:
         WorkloadState objects representing each discovered Deployment.
     """
-    snapshot = get_namespace_snapshot(k8s=k8s_client, namespace=namespace)
-
-    deployments: list[V1Deployment] = k8s_client.apps.list_namespaced_deployment(
+    deployments: list[V1Deployment] = k8s.apps.list_namespaced_deployment(
         namespace=namespace
     ).items
 
     for deployment in deployments:
         yield WorkloadState(
-            spec=get_workload_spec(snapshot=snapshot, deployment=deployment),
-            policies=get_workload_policies(snapshot=snapshot, deployment=deployment),
-            status=get_workload_status(deployment),
+            spec=get_workload_spec(deployment=deployment, is_full=False),
+            runtime=get_workload_runtime(deployment, is_full=False),
         )
 
 
 def discover_cluster(
-    k8s_client: KubernetesClient, agent_config: AgentConfigSchema
+    k8s: KubernetesClient, discovery: DiscoveryConfigSchema
 ) -> ClusterState:
     """
     Discover all namespaces in the cluster and their workloads.
@@ -59,18 +51,18 @@ def discover_cluster(
     namespaces → workloads.
 
     Args:
-        k8s_client: Kubernetes client instance.
-        agent_config: Agent config schema.
+        k8s: Kubernetes client instance.
+        discovery: Agent discovery config schema.
 
     Yields:
         NamespaceState objects containing workloads for each namespace.
     """
-    cluster_state = ClusterState(cluster_id=agent_config.cluster_id)
+    cluster_state = ClusterState(cluster_id=discovery.cluster_id)
 
-    for ns_name in agent_config.namespaces:
+    for ns_name in discovery.namespaces:
         ns_state = NamespaceState(name=ns_name)
 
-        for workload in discover_workloads(k8s_client, ns_name):
+        for workload in discover_workloads(k8s, ns_name):
             ns_state.workloads.append(workload)
 
         cluster_state.namespaces.append(ns_state)

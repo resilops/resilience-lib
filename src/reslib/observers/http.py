@@ -8,8 +8,8 @@ from reslib.constants import MetricsEnum
 from reslib.core.context import get_context
 from reslib.core.watchdog import watch_task_group
 from reslib.k8s.client import KubernetesClient
-from reslib.k8s.schema import WorkloadStatus
-from reslib.k8s.utils import get_workload_status
+from reslib.k8s.schema import WorkloadRuntimeState
+from reslib.k8s.utils import get_workload_runtime
 from reslib.observers.schemas import HTTPLatencyArgsTemplate
 from reslib.schemas.scenario import ResiliencyScenario
 from reslib.schemas.telemetry import MetricsPayload
@@ -17,7 +17,7 @@ from reslib.schemas.telemetry import MetricsPayload
 
 def _emit_metrics(
     *,
-    status: WorkloadStatus,
+    status: WorkloadRuntimeState,
     timed_response: Optional[h.TimedResponse] = None,
     error: Optional[Exception] = None,
 ) -> None:
@@ -90,7 +90,7 @@ async def measure_endpoint_latency(**kwargs) -> None:
     )
 
     # 3. Fetch workload status AFTER requests finish
-    status: WorkloadStatus = get_workload_status(deployment=deployment)
+    status: WorkloadRuntimeState = get_workload_runtime(deployment=deployment)
 
     # 4. Emit events for each completed request
     for task in completed_tasks:

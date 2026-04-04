@@ -200,7 +200,7 @@ def select_pods_to_stress(k8s: KubernetesClient) -> Tuple[List[V1Pod], int]:
     )
 
     pods_to_stress_count, stress_cpu_percent = calculate_hpa_trigger(
-        status=workload.status,
+        status=workload.runtime,
         metric=hpa_metric,
         idle_cpu_pct=scenario.template.idle_cpu_pct,
         cpu_stress_threshold_pct=scenario.template.cpu_stress_threshold_pct,

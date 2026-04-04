@@ -97,3 +97,12 @@ AsyncFunc = Callable[..., Awaitable[None]]
 
 POD_KILL_SCENARIO_TEMPLATE: str = "POD_KILL"
 HPA_SCALE_ON_CPU_STRESS_SCENARIO_TEMPLATE: str = "HPA_SCALE_ON_CPU_STRESS"
+
+
+class WorkloadStatusEnum(str, Enum):
+    """Workload status identifiers."""
+
+    healthy = "healthy"
+    degraded = "degraded"
+    reconciling = "reconciling"
+    unavailable = "unavailable"

@@ -31,11 +31,11 @@ async def validate_min_remaining_replicas() -> None:
     namespace = scenario.template.namespace
     workload_name = scenario.template.workload
 
-    total = workload.status.ready_replicas
+    total = workload.runtime.ready_replicas
     selection = QuantitySelection(
         mode=scenario.template.mode, amount=scenario.template.quantity
     )
-    pods_to_terminate = selection.with_total(workload.status.ready_replicas)
+    pods_to_terminate = selection.with_total(workload.runtime.ready_replicas)
 
     remaining = total - pods_to_terminate
 

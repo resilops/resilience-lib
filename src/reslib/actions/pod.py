@@ -116,7 +116,7 @@ async def terminate_pods(**kwargs) -> Dict:
     selection = QuantitySelection(
         mode=scenario.template.mode, amount=scenario.template.quantity
     )
-    pods_to_terminate = selection.with_total(workload.status.ready_replicas)
+    pods_to_terminate = selection.with_total(workload.runtime.ready_replicas)
 
     logger.info(f"Total pods to terminate is: {pods_to_terminate}")
 
@@ -131,7 +131,7 @@ async def terminate_pods(**kwargs) -> Dict:
                 "inputs": {
                     "mode": scenario.template.mode.value,
                     "quantity": scenario.template.quantity,
-                    "ready_replicas": workload.status.ready_replicas,
+                    "ready_replicas": workload.runtime.ready_replicas,
                 },
                 "observed": {
                     "pods_to_terminate": pods_to_terminate,

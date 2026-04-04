@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
-from reslib.constants import HpaMetricSourceEnum, K8DeploymentKind
+from reslib.constants import HpaMetricSourceEnum, K8DeploymentKind, WorkloadStatusEnum
 
 
 class ResourceRequirements(BaseModel):
@@ -72,12 +72,12 @@ class WorkloadSpec(BaseModel):
     hpa: Optional[HPAConfig] = Field(
         default=None, description="HPA configuration if present"
     )
-    labels: Dict[str, str] = Field(
-        default_factory=dict,
+    labels: Optional[Dict[str, str]] = Field(
+        default=None,
         description="Pod labels to select pods belonging to this workload",
     )
-    containers: List[ContainerSpec] = Field(
-        default_factory=list, description="Pod containers"
+    containers: Optional[List[ContainerSpec]] = Field(
+        default=None, description="Pod containers"
     )
 
 
@@ -89,36 +89,22 @@ class WorkloadPolicies(BaseModel):
     )
 
 
-class WorkloadStatus(BaseModel):
+class WorkloadRuntimeState(BaseModel):
     """Observed runtime state of a workload, used for stability checks."""
 
     ready_replicas: int = Field(..., ge=0, description="Number of ready replicas")
-    is_available: Optional[bool] = Field(
-        default=None, description="Whether the workload is currently available"
-    )
-    reconciling: Optional[bool] = Field(
-        default=None,
-        description="Whether Kubernetes is actively reconciling",
-    )
-    is_faulty: Optional[bool] = Field(
-        default=None, description="True if kubernetes deployment is faulty"
-    )
-    restart_events: int = Field(
-        default=0,
-        ge=0,
-        description="Number of pod restart events observed during the stability window",
-    )
-    spec_generation: Optional[int] = Field(
+    status: WorkloadStatusEnum = Field(..., description="Workload status")
+    generation: Optional[int] = Field(
         default=None, description="Generation of the workload spec currently desired"
     )
-    spec_applied_generation: Optional[int] = Field(
+    observed_generation: Optional[int] = Field(
         default=None,
         description=(
             "Generation of the workload spec currently applied by the controller"
         ),
     )
-    conditions: List[K8Condition] = Field(
-        default_factory=list, description="Workload conditions"
+    conditions: Optional[List[K8Condition]] = Field(
+        default=None, description="Workload conditions"
     )
 
 
@@ -127,7 +113,7 @@ class WorkloadState(BaseModel):
 
     spec: WorkloadSpec
     policies: Optional[WorkloadPolicies] = None
-    status: Optional[WorkloadStatus] = None
+    runtime: Optional[WorkloadRuntimeState] = None
 
 
 class NamespaceState(BaseModel):
@@ -148,7 +134,7 @@ class ClusterState(BaseModel):
     )
 
 
-class AgentConfigSchema(BaseModel):
+class DiscoveryConfigSchema(BaseModel):
     """Agent config schema"""
 
     cluster_id: int = Field(..., description="Cluster ID")

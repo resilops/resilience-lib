@@ -3,7 +3,7 @@ from typing import Dict, Optional
 from pydantic import BaseModel, Field
 
 from reslib.constants import EventEnum, MetricsEnum
-from reslib.k8s.schema import WorkloadStatus
+from reslib.k8s.schema import WorkloadRuntimeState
 from reslib.runtime.phases import ExecutionPhase
 
 
@@ -42,4 +42,6 @@ class MetricsPayload(BaseModel):
     is_error: bool = Field(default=False, description="Is error related metrics")
     details: Optional[str] = Field(default=None, description="Any additional details")
     measurement: Optional[Dict] = Field(default=None, description="MMetric measurement")
-    workload_status: WorkloadStatus = Field(..., description="Workload status")
+    workload_status: WorkloadRuntimeState = Field(
+        ..., description="Workload runtime state"
+    )
