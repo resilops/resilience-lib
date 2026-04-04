@@ -59,10 +59,10 @@ async def send_timed_request(client: httpx.AsyncClient, endpoint: str) -> TimedR
 
     Raises exceptions directly — they will be handled after requests complete.
     """
-    timestamp = datetime.now(timezone.utc)  # capture exact send time
+    timestamp = datetime.now(timezone.utc)
     start = time.perf_counter()
     response = await client.get(endpoint)
-    latency = time.perf_counter() - start
+    latency = (time.perf_counter() - start) * 1000
 
     response.raise_for_status()
 

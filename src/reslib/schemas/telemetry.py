@@ -42,7 +42,8 @@ class MetricsPayload(BaseModel):
         ..., description="Name of the function/class that's emitting this metrics."
     )
     is_error: bool = Field(default=False, description="Is error related metrics")
-    details: Optional[str] = Field(default=None, description="Any additional details")
+    error: Optional[str] = Field(default=None, description="Any error class")
+    data: Optional[Dict] = Field(default=None, description="Results of the event.")
     measurement: Optional[Dict] = Field(default=None, description="MMetric measurement")
     workload_state: WorkloadRuntimeState = Field(
         ..., description="Workload runtime state"
