@@ -119,7 +119,7 @@ class ObserverContext:
                 namespace=namespace,
                 workload=workload,
                 phase=ExecutionPhase.OBSERVER,
-                data={"observer": self.scenario.observer.name},
+                function=self.scenario.observer.name,
             )
         )
 
@@ -140,19 +140,16 @@ class ObserverContext:
         # Fail fast if observer, if there are any errors during warmup
         if self._task.done():
             exc = self._task.exception()
-            data = {"observer_name": self.scenario.observer.name}
             if exc:
-                if isinstance(exc, BaseError):
-                    data.update({**exc.to_dict()})
                 self.telemetry.emit_event(
                     event=EventPayload(
                         event_name=EventEnum.OBSERVER_FAILED,
                         namespace=namespace,
                         workload=workload,
                         phase=ExecutionPhase.OBSERVER,
-                        data=data,
+                        function=self.scenario.observer.name,
+                        data=exc.to_dict() if isinstance(exc, BaseError) else str(exc),
                         error=exc.__class__.__name__,
-                        details=str(exc),
                     )
                 )
                 raise exc
@@ -187,7 +184,7 @@ class ObserverContext:
                     namespace=namespace,
                     workload=workload,
                     phase=ExecutionPhase.OBSERVER,
-                    data={"observer": self.scenario.observer.name},
+                    function=self.scenario.observer.name,
                 )
             )
 

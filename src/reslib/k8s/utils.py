@@ -303,10 +303,10 @@ def get_workload_runtime(
         status = WorkloadStatusEnum.degraded
     elif reconciling:
         status = WorkloadStatusEnum.reconciling
-    elif not is_available:
-        status = WorkloadStatusEnum.unavailable
-    else:
+    elif is_available:
         status = WorkloadStatusEnum.healthy
+    else:
+        status = WorkloadStatusEnum.unavailable
 
     return WorkloadRuntimeState(
         ready_replicas=deployment.status.ready_replicas or 0,

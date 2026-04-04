@@ -17,7 +17,7 @@ from reslib.schemas.telemetry import MetricsPayload
 
 def _emit_metrics(
     *,
-    status: WorkloadRuntimeState,
+    state: WorkloadRuntimeState,
     timed_response: Optional[h.TimedResponse] = None,
     error: Optional[Exception] = None,
 ) -> None:
@@ -31,7 +31,7 @@ def _emit_metrics(
         namespace=scenario.template.namespace,
         workload=scenario.template.workload,
         function="measure_endpoint_latency",
-        workload_status=status,
+        workload_state=state,
     )
 
     if timed_response:
@@ -90,14 +90,16 @@ async def measure_endpoint_latency(**kwargs) -> None:
     )
 
     # 3. Fetch workload status AFTER requests finish
-    status: WorkloadRuntimeState = get_workload_runtime(deployment=deployment)
+    state: WorkloadRuntimeState = get_workload_runtime(
+        deployment=deployment, is_full=False
+    )
 
     # 4. Emit events for each completed request
     for task in completed_tasks:
         try:
             response: h.TimedResponse = task.result()
-            _emit_metrics(status=status, timed_response=response)
+            _emit_metrics(state=state, timed_response=response)
         except Exception as exc:
             # Already handled by monitor_tasks raising, just send metrics
-            _emit_metrics(status=status, error=exc)
+            _emit_metrics(state=state, error=exc)
             raise

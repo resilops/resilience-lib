@@ -17,7 +17,9 @@ class EventPayload(BaseModel):
     phase: ExecutionPhase = Field(
         ..., description="Name of the phase this event belongs to."
     )
-    details: Optional[str] = Field(default=None, description="Any detailed message")
+    function: str = Field(
+        ..., description="Name of the function/class that's emitting this event."
+    )
     error: Optional[str] = Field(default=None, description="Any error class")
     data: Optional[Dict] = Field(default=None, description="Results of the event.")
 
@@ -33,7 +35,7 @@ class MetricsPayload(BaseModel):
     """
 
     metrics_name: MetricsEnum = Field(..., description="Name of the metrics.")
-    type: str = Field(default="metrics", description="Type of payload")
+    type: str = Field(default="metric", description="Type of payload")
     namespace: str = Field(..., description="Kubernetes namespace")
     workload: str = Field(..., description="Workload name")
     function: str = Field(
@@ -42,6 +44,6 @@ class MetricsPayload(BaseModel):
     is_error: bool = Field(default=False, description="Is error related metrics")
     details: Optional[str] = Field(default=None, description="Any additional details")
     measurement: Optional[Dict] = Field(default=None, description="MMetric measurement")
-    workload_status: WorkloadRuntimeState = Field(
+    workload_state: WorkloadRuntimeState = Field(
         ..., description="Workload runtime state"
     )

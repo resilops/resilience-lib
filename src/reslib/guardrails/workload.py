@@ -68,7 +68,7 @@ async def ensure_workload_steady() -> None:
             retryable=True,
         )
 
-    if not runtime.status == WorkloadStatusEnum.unavailable:
+    if runtime.status == WorkloadStatusEnum.unavailable:
         raise WorkloadNotAvailableError(
             error_code="WORKLOAD_NOT_AVAILABLE",
             message="Workload is not available/stable; disruption is blocked.",

@@ -63,18 +63,16 @@ async def _execute_phase(
     """
     telemetry: h.BaseTelemetry = get_context("telemetry")
     scenario: ResiliencyScenario = get_context("scenario")
-
-    telemetry.emit_event(
-        event=EventPayload(
-            event_name=start_event,
-            namespace=scenario.template.workload,
-            workload=scenario.template.workload,
-            phase=phase,
-            details=f"Phase: {phase.value} execution started",
-        )
-    )
-
     for step in filter(lambda s: s.name and s.type == phase, scenario.steps):
+        telemetry.emit_event(
+            event=EventPayload(
+                event_name=start_event,
+                namespace=scenario.template.namespace,
+                workload=scenario.template.workload,
+                phase=phase,
+                function=step.name,
+            )
+        )
         try:
             func: AsyncFunc = resolver.resolve(phase=step.type, name=step.name)
             result = await func(**step.kwargs)
@@ -83,6 +81,7 @@ async def _execute_phase(
                     event_name=success_event,
                     namespace=scenario.template.namespace,
                     workload=scenario.template.workload,
+                    function=step.name,
                     phase=phase,
                     data=result,
                 )
@@ -94,7 +93,7 @@ async def _execute_phase(
                     namespace=scenario.template.namespace,
                     workload=scenario.template.workload,
                     phase=phase,
-                    details=str(exc),
+                    function=step.name,
                     error=exc.__class__.__name__,
                     data=exc.to_dict(),
                 )
@@ -107,8 +106,8 @@ async def _execute_phase(
                     namespace=scenario.template.namespace,
                     workload=scenario.template.workload,
                     phase=phase,
-                    details=str(exc),
                     error=exc.__class__.__name__,
+                    function=step.name,
                 )
             )
             raise
