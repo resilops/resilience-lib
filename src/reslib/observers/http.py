@@ -124,7 +124,7 @@ async def measure_endpoint_latency(**kwargs) -> None:
             raise_exception=False,
         )
 
-    deployment = k8s.apps.read_namespaced_deployment(
+    deployment = await k8s.read_namespaced_deployment(
         name=scenario.template.workload,
         namespace=scenario.template.namespace,
     )

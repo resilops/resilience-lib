@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import Optional
 
@@ -138,8 +139,10 @@ async def execute_resilience_scenario(
     """
     _lib_setup()
 
-    workload: WorkloadState = get_workload(
-        namespace=scenario.template.namespace, name=scenario.template.workload
+    workload: WorkloadState = await asyncio.to_thread(
+        get_workload,
+        namespace=scenario.template.namespace,
+        name=scenario.template.workload,
     )
 
     async with ScenarioContext(

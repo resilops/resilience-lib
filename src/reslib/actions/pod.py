@@ -13,7 +13,7 @@ from reslib.k8s.exceptions import PodDeletionTimeoutError, PodsSelectionError
 from reslib.k8s.schema import WorkloadState
 from reslib.k8s.utils import (
     get_pod_termination_timeout,
-    get_workload_pods,
+    get_workload_pods_async,
     pod_exists,
 )
 from reslib.schemas.scenario import ResiliencyScenario
@@ -22,7 +22,9 @@ from reslib.schemas.validators import QuantitySelection
 logger = logging.getLogger(__name__)
 
 
-def watch_pod_deletion(k8s: KubernetesClient, pod: V1Pod, namespace: str, timeout: int):
+async def watch_pod_deletion(
+    k8s: KubernetesClient, pod: V1Pod, namespace: str, timeout: int
+):
     """
     Delete a pod and return a watchable task to monitor its deletion.
 
@@ -44,7 +46,7 @@ def watch_pod_deletion(k8s: KubernetesClient, pod: V1Pod, namespace: str, timeou
     Raises:
         PodDeletionTimeoutError: If the pod is not deleted within the specified timeout.
     """
-    k8s.v1_api.delete_namespaced_pod(
+    await k8s.delete_namespaced_pod(
         name=pod.metadata.name, namespace=namespace, body=V1DeleteOptions()
     )
     return (
@@ -147,7 +149,9 @@ async def terminate_pods(**kwargs) -> Dict:
     # 3. List candidate pods
     k8s = KubernetesClient()
 
-    pods = get_workload_pods(k8s=k8s, namespace=namespace, workload_spec=workload.spec)
+    pods = await get_workload_pods_async(
+        k8s=k8s, namespace=namespace, workload_spec=workload.spec
+    )
     candidate_pods: List[V1Pod] = random.sample(pods, k=pods_to_terminate)
 
     if not candidate_pods:
@@ -180,10 +184,13 @@ async def terminate_pods(**kwargs) -> Dict:
     timeout: int = get_pod_termination_timeout(
         candidate_pods, max_timeout=args.timeout_seconds
     )
-    tasks = [
-        watch_pod_deletion(k8s=k8s, pod=pod, namespace=namespace, timeout=timeout)
-        for pod in candidate_pods
-    ]
+    tasks = []
+    for pod in candidate_pods:
+        tasks.append(
+            await watch_pod_deletion(
+                k8s=k8s, pod=pod, namespace=namespace, timeout=timeout
+            )
+        )
     await watch_task_group(
         tasks=tasks, timeout=timeout + 5, return_when=asyncio.FIRST_EXCEPTION
     )
