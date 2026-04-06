@@ -380,7 +380,7 @@ def get_workload(
     )
 
 
-def pod_exists(
+async def pod_exists(
     *,
     namespace: str,
     pod_name: str,
@@ -399,7 +399,7 @@ def pod_exists(
     """
     k8s = k8s or KubernetesClient()
     try:
-        k8s.v1_api.read_namespaced_pod(name=pod_name, namespace=namespace)
+        await k8s.read_namespaced_pod(name=pod_name, namespace=namespace)
         return True
     except ApiException as exc:
         if exc.status == 404:
@@ -494,6 +494,25 @@ def get_workload_pods(
     return [pod for pod in pods.items if pod.status.phase == pod_phase]
 
 
+async def get_workload_pods_async(
+    *,
+    k8s: KubernetesClient,
+    namespace: str,
+    workload_spec: WorkloadSpec,
+    pod_phase: Optional[str] = POD_RUNNING_STATUS,
+) -> List[V1Pod]:
+    """
+    Async version of get_workload_pods to avoid blocking the event loop.
+    """
+    selector = ",".join(f"{key}={value}" for key, value in workload_spec.labels.items())
+    pods = await k8s.list_namespaced_pod(namespace=namespace, label_selector=selector)
+
+    if pod_phase is None:
+        return [pod for pod in pods.items]
+
+    return [pod for pod in pods.items if pod.status.phase == pod_phase]
+
+
 def calculate_hpa_trigger(
     status: WorkloadRuntimeState,
     metric: HPAMetricSpec,
@@ -569,7 +588,7 @@ def get_hpa_current_average_utilization(
     return None
 
 
-def raise_on_container_fail(
+async def raise_on_container_fail(
     k8s: KubernetesClient, workload_spec: WorkloadSpec, namespace: str
 ) -> None:
     """
@@ -584,7 +603,7 @@ def raise_on_container_fail(
         ContainerCrashedError: If any container is in a crash, waiting with
         abnormal reason, or terminated with an unexpected reason or non-zero exit code.
     """
-    pods: List[V1Pod] = get_workload_pods(
+    pods: List[V1Pod] = await get_workload_pods_async(
         k8s=k8s, workload_spec=workload_spec, namespace=namespace, pod_phase=None
     )
 
@@ -657,7 +676,7 @@ def raise_on_container_fail(
                 )
 
 
-def raise_on_hpa_scale(
+async def raise_on_hpa_scale(
     k8s: KubernetesClient, namespace: str, workload: WorkloadState
 ) -> Optional[Dict[str, int]]:
     """
@@ -675,14 +694,14 @@ def raise_on_hpa_scale(
     Raises:
         HpaScaledError: If the number of ready replicas exceeds start_replicas.
     """
-    deployment = k8s.apps.read_namespaced_deployment(
+    deployment = await k8s.read_namespaced_deployment(
         name=workload.spec.name, namespace=namespace
     )
     start_replicas = workload.runtime.ready_replicas
     current_replicas = deployment.status.ready_replicas or 0
 
     if current_replicas > start_replicas:
-        hpa = k8s.autoscaling.read_namespaced_horizontal_pod_autoscaler(
+        hpa = await k8s.read_namespaced_horizontal_pod_autoscaler(
             name=workload.spec.hpa.name, namespace=namespace
         )
         raise HpaScaledError(
@@ -708,7 +727,7 @@ def raise_on_hpa_scale(
     return None
 
 
-def raise_on_desired_replicas(
+async def raise_on_desired_replicas(
     k8s: KubernetesClient,
     workload_name: str,
     namespace: str,
@@ -730,7 +749,7 @@ def raise_on_desired_replicas(
             than or equal to the desired replicas specified in the Deployment
             spec.
     """
-    deployment = k8s.apps.read_namespaced_deployment(
+    deployment = await k8s.read_namespaced_deployment(
         name=workload_name,
         namespace=namespace,
     )
@@ -763,7 +782,7 @@ def raise_on_desired_replicas(
         )
 
 
-def raise_on_replicas_restored_cpu(
+async def raise_on_replicas_restored_cpu(
     k8s: KubernetesClient,
     namespace: str,
     stress_context: Dict[Any, Any],
@@ -787,10 +806,10 @@ def raise_on_replicas_restored_cpu(
     stress_average_utilization = stress_context.get("average_utilization")
     max_replicas_on_stress = stress_context.get("after_replicas")
 
-    deployment = k8s.apps.read_namespaced_deployment(
+    deployment = await k8s.read_namespaced_deployment(
         name=initial_workload_state.spec.name, namespace=namespace
     )
-    hpa = k8s.autoscaling.read_namespaced_horizontal_pod_autoscaler(
+    hpa = await k8s.read_namespaced_horizontal_pod_autoscaler(
         name=initial_workload_state.spec.hpa.name, namespace=namespace
     )
 

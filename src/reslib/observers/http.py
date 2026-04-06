@@ -1,5 +1,6 @@
 import asyncio
-from collections import Counter
+from collections import Counter, deque
+from typing import Deque, Sequence
 
 import httpx
 
@@ -19,6 +20,7 @@ from reslib.schemas.telemetry import MetricsPayload
 #   le_5 = count of requests with latency <= 5ms
 #   le_10 = count of requests with latency <= 10ms
 LATENCY_BUCKET_BOUNDS_MS = [5, 10, 25, 50, 100, 250, 500, 1000]
+ERROR_SAMPLE_LIMIT = 20
 
 
 def _build_latency_buckets(latencies: list[float]) -> dict[str, int]:
@@ -38,16 +40,16 @@ def _emit_aggregated_metrics(
     *,
     state: WorkloadRuntimeState,
     timed_responses: list[h.TimedResponse],
-    errors: list[Exception],
+    error_samples: Sequence[Exception],
+    error_count: int,
 ) -> None:
     """Emit one aggregated HTTP metric for a single observer interval."""
 
     telemetry: h.BaseTelemetry = get_context("telemetry")
     scenario: ResiliencyScenario = get_context("scenario")
 
-    request_count = len(timed_responses) + len(errors)
+    request_count = len(timed_responses) + error_count
     success_count = len(timed_responses)
-    error_count = len(errors)
 
     status_code_counts = Counter(
         str(response.response.status_code) for response in timed_responses
@@ -81,9 +83,13 @@ def _emit_aggregated_metrics(
         function="measure_endpoint_latency",
         workload_state=state,
         measurement=measurement,
-        is_error=bool(errors),
-        error=errors[0].__class__.__name__ if errors else None,
-        data={"errors": [str(error) for error in errors]} if errors else None,
+        is_error=bool(error_samples),
+        error=error_samples[0].__class__.__name__ if error_samples else None,
+        data=(
+            {"errors": [str(error) for error in error_samples]}
+            if error_samples
+            else None
+        ),
     )
 
     telemetry.emit_metrics(metrics=metrics)
@@ -124,7 +130,7 @@ async def measure_endpoint_latency(**kwargs) -> None:
             raise_exception=False,
         )
 
-    deployment = k8s.apps.read_namespaced_deployment(
+    deployment = await k8s.read_namespaced_deployment(
         name=scenario.template.workload,
         namespace=scenario.template.namespace,
     )
@@ -134,19 +140,19 @@ async def measure_endpoint_latency(**kwargs) -> None:
     )
 
     timed_responses: list[h.TimedResponse] = []
-    errors: list[Exception] = []
+    error_samples: Deque[Exception] = deque(maxlen=ERROR_SAMPLE_LIMIT)
+    error_count = 0
 
     for task in completed_tasks:
         try:
             timed_responses.append(task.result())
         except Exception as exc:
-            errors.append(exc)
+            error_count += 1
+            error_samples.append(exc)
 
     _emit_aggregated_metrics(
         state=state,
         timed_responses=timed_responses,
-        errors=errors,
+        error_samples=error_samples,
+        error_count=error_count,
     )
-
-    if errors:
-        raise errors[0]
