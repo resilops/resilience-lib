@@ -1,6 +1,6 @@
 from typing import Generator, List
 
-from kubernetes.client import V1Deployment
+from kubernetes.client import V1Deployment, V1Service
 
 from reslib.k8s.client import KubernetesClient
 from reslib.k8s.schema import (
@@ -32,10 +32,17 @@ def discover_workloads(
     deployments: list[V1Deployment] = k8s.apps.list_namespaced_deployment(
         namespace=namespace
     ).items
+    services: list[V1Service] = k8s.v1_api.list_namespaced_service(
+        namespace=namespace
+    ).items
 
     for deployment in deployments:
         yield WorkloadState(
-            spec=get_workload_spec(deployment=deployment, is_full=False),
+            spec=get_workload_spec(
+                deployment=deployment,
+                services=services,
+                is_full=False,
+            ),
             runtime=get_workload_runtime(deployment, is_full=False),
         )
 

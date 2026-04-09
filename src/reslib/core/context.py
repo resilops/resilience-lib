@@ -99,7 +99,7 @@ class ObserverContext:
             phase=ExecutionPhase.OBSERVER, name=self.scenario.observer.name
         )
         while True:
-            await observer_func(**self.scenario.observer.kwargs)
+            await observer_func(**self.scenario.observer.params)
             await asyncio.sleep(self.scenario.observer.config.sampling_interval_seconds)
 
     async def start(self) -> None:

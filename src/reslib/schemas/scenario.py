@@ -5,8 +5,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from reslib.runtime.phases import ExecutionPhase
 from reslib.schemas.templates import (
     SCENARIO_TEMPLATES_MAPPING,
-    HPAScaleStressCPUScenarioTemplate,
-    PodKillScenarioTemplate,
+    HpaCpuStressTemplate,
+    PodKillTemplate,
 )
 
 
@@ -22,7 +22,7 @@ class StepSpec(BaseModel):
 
     type: ExecutionPhase = Field(..., description="Type of the step in the scenario.")
     name: str = Field(..., description="Name of the callable or function to execute.")
-    kwargs: Dict[str, Any] = Field(
+    params: Dict[str, Any] = Field(
         default_factory=dict, description="Arguments passed to the callable."
     )
 
@@ -62,7 +62,7 @@ class ObserverSpec(BaseModel):
 
     - `name`: observer callable name
     - `config`: timing configuration
-    - `kwargs`: callable-specific arguments
+    - `params`: callable-specific arguments
     """
 
     name: str = Field(..., description="Name of the observer callable.")
@@ -70,7 +70,7 @@ class ObserverSpec(BaseModel):
         default_factory=ObserverConfig,
         description="Timing and sampling configuration for the observer.",
     )
-    kwargs: Dict[str, Any] = Field(
+    params: Dict[str, Any] = Field(
         default_factory=dict, description="Arguments passed to the observer callable."
     )
 
@@ -89,7 +89,7 @@ class ResiliencyScenario(BaseModel):
     name: str = Field(..., description="Name of the scenario template.")
     title: str = Field(..., description="Title of the scenario template.")
     description: str = Field(..., description="Description of the scenario template.")
-    template: PodKillScenarioTemplate | HPAScaleStressCPUScenarioTemplate = Field(
+    template: PodKillTemplate | HpaCpuStressTemplate = Field(
         ...,
         description="Scenario-specific template fields.",
     )
@@ -108,7 +108,7 @@ class ResiliencyScenario(BaseModel):
 
         This validator executes before standard model validation. It inspects
         the `name` field to determine which concrete template model should be
-        used (e.g. PodKillScenarioTemplate, HPAScaleStressCPUScenarioTemplate).
+        used (e.g. PodKillTemplate, HpaCpuStressTemplate).
 
         The raw `template` dictionary is then validated against the selected
         template model and replaced with a strongly-typed instance.

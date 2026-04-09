@@ -140,3 +140,9 @@ class KubernetesClient:
             self.apps.list_namespaced_deployment,
             namespace=namespace,
         )
+
+    async def list_namespaced_service(self, *, namespace: str):
+        return await asyncio.to_thread(
+            self.v1_api.list_namespaced_service,
+            namespace=namespace,
+        )

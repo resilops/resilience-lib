@@ -1,9 +1,17 @@
+import asyncio
 import logging
 import math
 from typing import Any, Dict, List, Optional, Tuple
 
-from cachetools import TTLCache, cached
-from kubernetes.client import V1Deployment, V1Pod, V2HorizontalPodAutoscaler
+from cachetools import TTLCache
+from cachetools.keys import hashkey
+from kubernetes.client import (
+    V1Deployment,
+    V1Pod,
+    V1Probe,
+    V1Service,
+    V2HorizontalPodAutoscaler,
+)
 from kubernetes.client.exceptions import ApiException
 
 from reslib.config import config
@@ -32,11 +40,13 @@ from reslib.k8s.exceptions import (
     WorkloadNotFound,
 )
 from reslib.k8s.schema import (
+    ContainerHealthSpec,
     ContainerSpec,
     HPAConfig,
     HPAMetricSpec,
     K8Condition,
     PDBConfig,
+    ProbeHttpGet,
     ResourceRequirements,
     WorkloadPolicies,
     WorkloadRuntimeState,
@@ -48,6 +58,7 @@ from reslib.k8s.snapshot import NamespaceSnapshot
 logger = logging.getLogger(__name__)
 
 _namespace_cache = TTLCache(maxsize=64, ttl=30)  # seconds
+_namespace_cache_lock = asyncio.Lock()
 
 
 def get_deployment_conditions(deployment: V1Deployment) -> List[Optional[K8Condition]]:
@@ -155,8 +166,7 @@ def is_deployment_faulty(deployment: V1Deployment) -> bool:
     return False
 
 
-@cached(_namespace_cache)
-def get_namespace_policies_snapshot(
+async def get_namespace_policies_snapshot(
     k8s: KubernetesClient, namespace: str
 ) -> NamespaceSnapshot:
     """
@@ -180,17 +190,46 @@ def get_namespace_policies_snapshot(
         NamespaceSnapshot: Immutable object containing the HPAs and PDBs
         for the namespace.
     """
-    hpas = k8s.autoscaling.list_namespaced_horizontal_pod_autoscaler(
-        namespace=namespace
-    ).items
-    pdbs = k8s.policy.list_namespaced_pod_disruption_budget(namespace=namespace).items
+    cache_key = hashkey(k8s, namespace)
+    cached_snapshot = _namespace_cache.get(cache_key)
+    if cached_snapshot is not None:
+        return cached_snapshot
 
-    return NamespaceSnapshot(
-        hpas={hpa.spec.scale_target_ref.name: hpa for hpa in hpas}, pdbs=pdbs
+    hpa_list, pdb_list = await asyncio.gather(
+        k8s.list_namespaced_horizontal_pod_autoscaler(namespace=namespace),
+        k8s.list_namespaced_pod_disruption_budget(namespace=namespace),
+    )
+
+    snapshot = NamespaceSnapshot(
+        hpas={hpa.spec.scale_target_ref.name: hpa for hpa in hpa_list.items},
+        pdbs=pdb_list.items,
+    )
+
+    async with _namespace_cache_lock:
+        existing_snapshot = _namespace_cache.get(cache_key)
+        if existing_snapshot is not None:
+            return existing_snapshot
+        _namespace_cache[cache_key] = snapshot
+
+    return snapshot
+
+
+def _probe_http_get(probe: Optional[V1Probe]) -> Optional[ProbeHttpGet]:
+    """Build http health endpoints"""
+    if not probe or not probe.http_get:
+        return None
+    http_get = probe.http_get
+    return ProbeHttpGet(
+        path=getattr(http_get, "path", None),
+        port=getattr(http_get, "port", None),
+        host=getattr(http_get, "host", None),
+        scheme=getattr(http_get, "scheme", None),
     )
 
 
-def _build_container_specs(deployment: V1Deployment) -> List[ContainerSpec]:
+def _build_container_specs(
+    deployment: V1Deployment, is_full: bool = True
+) -> List[ContainerSpec]:
     """Build container specs from a deployment pod template."""
     containers: list[ContainerSpec] = []
     pod_spec = deployment.spec.template.spec
@@ -204,8 +243,19 @@ def _build_container_specs(deployment: V1Deployment) -> List[ContainerSpec]:
                 name=container.name,
                 resources=(
                     ResourceRequirements(requests=requests, limits=limits)
-                    if res
+                    if res and is_full
                     else None
+                ),
+                health=ContainerHealthSpec(
+                    readiness=_probe_http_get(
+                        getattr(container, "readiness_probe", None),
+                    ),
+                    liveness=_probe_http_get(
+                        getattr(container, "liveness_probe", None),
+                    ),
+                    startup=_probe_http_get(
+                        getattr(container, "startup_probe", None),
+                    ),
                 ),
             )
         )
@@ -232,10 +282,32 @@ def _build_hpa_config(
     )
 
 
+def get_service_name(
+    deployment: V1Deployment,
+    services: Optional[List[V1Service]] = None,
+) -> Optional[str]:
+    """Return a deterministic service name matching the deployment pod labels."""
+    if not services:
+        return None
+
+    pod_labels = deployment.spec.template.metadata.labels or {}
+    matching_service_names = [
+        service.metadata.name
+        for service in services
+        if service.spec.selector
+        and all(
+            pod_labels.get(key) == value for key, value in service.spec.selector.items()
+        )
+    ]
+
+    return min(matching_service_names) if matching_service_names else None
+
+
 def get_workload_spec(
     *,
     deployment: V1Deployment,
     snapshot: Optional[NamespaceSnapshot] = None,
+    services: Optional[List[V1Service]] = None,
     is_full: bool = True,
 ) -> WorkloadSpec:
     """
@@ -249,6 +321,9 @@ def get_workload_spec(
             Optional namespace snapshot used to resolve HPA configuration.
             Only used in `full` mode.
 
+        services:
+            Services
+
         is_full:
             Level of detail to include in the returned workload spec.
 
@@ -259,11 +334,12 @@ def get_workload_spec(
 
     return WorkloadSpec(
         name=deployment.metadata.name,
+        service_name=get_service_name(deployment, services),
         kind=K8DeploymentKind.DEPLOYMENT,
         replicas=deployment.spec.replicas or 0,
         hpa=_build_hpa_config(deployment, snapshot) if is_full else None,
         labels=deployment.spec.selector.match_labels if is_full else None,
-        containers=_build_container_specs(deployment) if is_full else None,
+        containers=_build_container_specs(deployment, is_full=is_full),
     )
 
 
@@ -317,7 +393,7 @@ def get_workload_runtime(
     )
 
 
-def get_workload(
+async def get_workload(
     *,
     namespace: str,
     name: str,
@@ -341,10 +417,13 @@ def get_workload(
         WorkloadNotFound: If the Deployment does not exist.
     """
     k8s = k8s or KubernetesClient()
-    snapshot = get_namespace_policies_snapshot(k8s=k8s, namespace=namespace)
+    snapshot, service_list = await asyncio.gather(
+        get_namespace_policies_snapshot(k8s=k8s, namespace=namespace),
+        k8s.list_namespaced_service(namespace=namespace),
+    )
 
     try:
-        deployment = k8s.apps.read_namespaced_deployment(
+        deployment = await k8s.read_namespaced_deployment(
             name=name,
             namespace=namespace,
         )
@@ -374,7 +453,11 @@ def get_workload(
         raise
 
     return WorkloadState(
-        spec=get_workload_spec(snapshot=snapshot, deployment=deployment),
+        spec=get_workload_spec(
+            snapshot=snapshot,
+            services=service_list.items,
+            deployment=deployment,
+        ),
         policies=get_workload_policies(snapshot=snapshot, deployment=deployment),
         runtime=get_workload_runtime(deployment),
     )

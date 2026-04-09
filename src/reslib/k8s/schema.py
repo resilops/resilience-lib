@@ -6,6 +6,23 @@ from pydantic import BaseModel, Field
 from reslib.constants import HpaMetricSourceEnum, K8DeploymentKind, WorkloadStatusEnum
 
 
+class ProbeHttpGet(BaseModel):
+    """Probe HTTP get model."""
+
+    path: Optional[str] = None
+    port: Optional[Any] = None
+    host: Optional[str] = None
+    scheme: Optional[str] = None
+
+
+class ContainerHealthSpec(BaseModel):
+    """Container health model."""
+
+    readiness: Optional[ProbeHttpGet] = None
+    liveness: Optional[ProbeHttpGet] = None
+    startup: Optional[ProbeHttpGet] = None
+
+
 class ResourceRequirements(BaseModel):
     """
     Kubernetes-like resource requirements.
@@ -22,6 +39,7 @@ class ContainerSpec(BaseModel):
 
     name: str
     resources: Optional[ResourceRequirements] = None
+    health: Optional[ContainerHealthSpec] = None
 
 
 class K8Condition(BaseModel):
@@ -67,6 +85,9 @@ class WorkloadSpec(BaseModel):
     """Desired configuration of a workload."""
 
     name: str = Field(..., description="Workload name")
+    service_name: Optional[str] = Field(
+        default=None, description="Primary Service name targeting this workload"
+    )
     kind: K8DeploymentKind = Field(..., description="Kubernetes workload type")
     replicas: int = Field(..., ge=0, description="Desired number of replicas")
     hpa: Optional[HPAConfig] = Field(

@@ -1,4 +1,3 @@
-import asyncio
 import logging
 from typing import Optional
 
@@ -76,7 +75,7 @@ async def _execute_phase(
         )
         try:
             func: AsyncFunc = resolver.resolve(phase=step.type, name=step.name)
-            result = await func(**step.kwargs)
+            result = await func(**step.params)
             telemetry.emit_event(
                 event=EventPayload(
                     event_name=success_event,
@@ -139,8 +138,7 @@ async def execute_resilience_scenario(
     """
     _lib_setup()
 
-    workload: WorkloadState = await asyncio.to_thread(
-        get_workload,
+    workload: WorkloadState = await get_workload(
         namespace=scenario.template.namespace,
         name=scenario.template.workload,
     )
