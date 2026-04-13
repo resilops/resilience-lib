@@ -12,8 +12,7 @@ class EventPayload(BaseModel):
 
     event_name: EventEnum = Field(..., description="Name of the event.")
     type: str = Field(default="event", description="Type of payload")
-    namespace: str = Field(..., description="Kubernetes namespace")
-    workload: str = Field(..., description="Workload name")
+    source: str = Field(default="lib", description="Source of the event.")
     phase: ExecutionPhase = Field(
         ..., description="Name of the phase this event belongs to."
     )

@@ -110,14 +110,9 @@ class ObserverContext:
         and the scenario execution is aborted.
         """
         logger.info("Starting observer: %s", self.scenario.observer.name)
-        scenario_ctx: ResiliencyScenario = get_context("scenario")
-        namespace = scenario_ctx.template.namespace
-        workload = scenario_ctx.template.workload
         self.telemetry.emit_event(
             event=EventPayload(
                 event_name=EventEnum.OBSERVER_STARTED,
-                namespace=namespace,
-                workload=workload,
                 phase=ExecutionPhase.OBSERVER,
                 function=self.scenario.observer.name,
             )
@@ -144,8 +139,6 @@ class ObserverContext:
                 self.telemetry.emit_event(
                     event=EventPayload(
                         event_name=EventEnum.OBSERVER_FAILED,
-                        namespace=namespace,
-                        workload=workload,
                         phase=ExecutionPhase.OBSERVER,
                         function=self.scenario.observer.name,
                         data=exc.to_dict() if isinstance(exc, BaseError) else str(exc),
@@ -175,14 +168,9 @@ class ObserverContext:
         except asyncio.CancelledError:
             logger.debug("Observer task %s cancelled", self.scenario.observer.name)
         finally:
-            scenario_ctx: ResiliencyScenario = get_context("scenario")
-            namespace = scenario_ctx.template.namespace
-            workload = scenario_ctx.template.workload
             self.telemetry.emit_event(
                 event=EventPayload(
                     event_name=EventEnum.OBSERVER_STOPPED,
-                    namespace=namespace,
-                    workload=workload,
                     phase=ExecutionPhase.OBSERVER,
                     function=self.scenario.observer.name,
                 )

@@ -67,8 +67,6 @@ async def _execute_phase(
         telemetry.emit_event(
             event=EventPayload(
                 event_name=start_event,
-                namespace=scenario.template.namespace,
-                workload=scenario.template.workload,
                 phase=phase,
                 function=step.name,
             )
@@ -79,8 +77,6 @@ async def _execute_phase(
             telemetry.emit_event(
                 event=EventPayload(
                     event_name=success_event,
-                    namespace=scenario.template.namespace,
-                    workload=scenario.template.workload,
                     function=step.name,
                     phase=phase,
                     data=result,
@@ -90,8 +86,6 @@ async def _execute_phase(
             telemetry.emit_event(
                 event=EventPayload(
                     event_name=failure_event,
-                    namespace=scenario.template.namespace,
-                    workload=scenario.template.workload,
                     phase=phase,
                     function=step.name,
                     error=exc.__class__.__name__,
@@ -103,8 +97,6 @@ async def _execute_phase(
             telemetry.emit_event(
                 event=EventPayload(
                     event_name=failure_event,
-                    namespace=scenario.template.namespace,
-                    workload=scenario.template.workload,
                     phase=phase,
                     error=exc.__class__.__name__,
                     function=step.name,
