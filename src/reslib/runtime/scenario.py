@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import Optional
 
@@ -5,7 +6,7 @@ from kubernetes import config as k8sconfig
 
 from reslib import helpers as h
 from reslib.config import config
-from reslib.constants import AsyncFunc, EventEnum
+from reslib.constants import PHASE_EXECUTION_MAX_TIMEOUT, AsyncFunc, EventEnum
 from reslib.core.context import ObserverContext, ScenarioContext, get_context
 from reslib.exceptions import BaseError
 from reslib.k8s.schema import WorkloadState
@@ -72,8 +73,10 @@ async def _execute_phase(
             )
         )
         try:
-            func: AsyncFunc = resolver.resolve(phase=step.type, name=step.name)
-            result = await func(**step.params)
+            async with asyncio.timeout(PHASE_EXECUTION_MAX_TIMEOUT):
+                func: AsyncFunc = resolver.resolve(phase=step.type, name=step.name)
+                result = await func(**step.params)
+
             telemetry.emit_event(
                 event=EventPayload(
                     event_name=success_event,
@@ -90,6 +93,17 @@ async def _execute_phase(
                     function=step.name,
                     error=exc.__class__.__name__,
                     data=exc.to_dict(),
+                )
+            )
+            raise
+        except TimeoutError:
+            telemetry.emit_event(
+                event=EventPayload(
+                    event_name=failure_event,
+                    phase=phase,
+                    function=step.name,
+                    error="TimeoutError",
+                    data={"timeout_seconds": PHASE_EXECUTION_MAX_TIMEOUT},
                 )
             )
             raise

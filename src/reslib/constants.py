@@ -4,6 +4,7 @@ from typing import Awaitable, Callable, Tuple
 POD_RUNNING_STATUS = "Running"
 DEPLOYMENT_CONDITION_AVAILABLE = "Available"
 DEPLOYMENT_CONDITION_PROGRESSING = "Progressing"
+PHASE_EXECUTION_MAX_TIMEOUT: int = 1800  # Upper limit cutoff
 
 DEPLOYMENT_STATUS_RS_AVAILABLE = "NewReplicaSetAvailable"
 DEPLOYMENT_STATUS_MIN_RS_AVAILABLE = "MinimumReplicasAvailable"

@@ -38,7 +38,7 @@ class ObserverConfig(BaseModel):
 
     sampling_interval_seconds: int = Field(
         default=5,
-        ge=1,
+        ge=3,
         le=10,
         description="Interval between observer samples in seconds.",
     )
