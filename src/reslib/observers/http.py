@@ -13,7 +13,7 @@ from reslib.k8s.schema import WorkloadRuntimeState
 from reslib.k8s.utils import get_workload_runtime
 from reslib.observers.schemas import HTTPLatencyArgsTemplate
 from reslib.schemas.scenario import ResiliencyScenario
-from reslib.schemas.telemetry import MetricsPayload
+from reslib.schemas.telemetry import MetricPayload
 
 # Cumulative latency buckets in milliseconds.
 # Example:
@@ -46,7 +46,6 @@ def _emit_aggregated_metrics(
     """Emit one aggregated HTTP metric for a single observer interval."""
 
     telemetry: h.BaseTelemetry = get_context("telemetry")
-    scenario: ResiliencyScenario = get_context("scenario")
 
     request_count = len(timed_responses) + error_count
     success_count = len(timed_responses)
@@ -76,10 +75,8 @@ def _emit_aggregated_metrics(
             }
         )
 
-    metrics = MetricsPayload(
+    metrics = MetricPayload(
         metrics_name=MetricsEnum.HTTP,
-        namespace=scenario.template.namespace,
-        workload=scenario.template.workload,
         function="measure_endpoint_latency",
         workload_state=state,
         measurement=measurement,

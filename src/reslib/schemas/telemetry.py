@@ -23,7 +23,7 @@ class EventPayload(BaseModel):
     data: Optional[Dict] = Field(default=None, description="Results of the event.")
 
 
-class MetricsPayload(BaseModel):
+class MetricPayload(BaseModel):
     """
     Standardized payload for emitting metrics in the Resilience Library (Reslib).
 
@@ -35,8 +35,6 @@ class MetricsPayload(BaseModel):
 
     metrics_name: MetricsEnum = Field(..., description="Name of the metrics.")
     type: str = Field(default="metric", description="Type of payload")
-    namespace: str = Field(..., description="Kubernetes namespace")
-    workload: str = Field(..., description="Workload name")
     function: str = Field(
         ..., description="Name of the function/class that's emitting this metrics."
     )

@@ -1,4 +1,3 @@
-import asyncio
 import logging
 from typing import Optional
 
@@ -73,9 +72,9 @@ async def _execute_phase(
             )
         )
         try:
-            async with asyncio.timeout(PHASE_EXECUTION_MAX_TIMEOUT):
-                func: AsyncFunc = resolver.resolve(phase=step.type, name=step.name)
-                result = await func(**step.params)
+            # async with asyncio.timeout(PHASE_EXECUTION_MAX_TIMEOUT):
+            func: AsyncFunc = resolver.resolve(phase=step.type, name=step.name)
+            result = await func(**step.params)
 
             telemetry.emit_event(
                 event=EventPayload(

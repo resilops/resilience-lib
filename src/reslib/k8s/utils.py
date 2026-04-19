@@ -214,25 +214,36 @@ async def get_namespace_policies_snapshot(
     return snapshot
 
 
-def _probe_http_get(probe: Optional[V1Probe]) -> Optional[ProbeHttpGet]:
-    """Build http health endpoints"""
+def _probe_http_get(
+    probe: Optional[V1Probe],
+    service_name: Optional[str],
+    namespace: Optional[str],
+) -> Optional[ProbeHttpGet]:
+    """Build the http probe endpoints"""
     if not probe or not probe.http_get:
         return None
+
     http_get = probe.http_get
+
+    host = getattr(http_get, "host", None)
+    if not host and service_name and namespace:
+        host = f"{service_name}.{namespace}.svc.cluster.local"
+
     return ProbeHttpGet(
-        path=getattr(http_get, "path", None),
+        path=getattr(http_get, "path", None) or "/",
         port=getattr(http_get, "port", None),
-        host=getattr(http_get, "host", None),
-        scheme=getattr(http_get, "scheme", None),
+        host=host,
+        scheme=(getattr(http_get, "scheme", None) or "HTTP").lower(),
     )
 
 
 def _build_container_specs(
-    deployment: V1Deployment, is_full: bool = True
+    deployment: V1Deployment, service_name: str, is_full: bool = True
 ) -> List[ContainerSpec]:
     """Build container specs from a deployment pod template."""
     containers: list[ContainerSpec] = []
     pod_spec = deployment.spec.template.spec
+    namespace = deployment.metadata.namespace
 
     for container in pod_spec.containers or []:
         res = getattr(container, "resources", None)
@@ -249,12 +260,22 @@ def _build_container_specs(
                 health=ContainerHealthSpec(
                     readiness=_probe_http_get(
                         getattr(container, "readiness_probe", None),
+                        service_name,
+                        namespace,
                     ),
                     liveness=_probe_http_get(
                         getattr(container, "liveness_probe", None),
+                        service_name,
+                        namespace,
                     ),
-                    startup=_probe_http_get(
-                        getattr(container, "startup_probe", None),
+                    startup=(
+                        _probe_http_get(
+                            getattr(container, "startup_probe", None),
+                            service_name,
+                            namespace,
+                        )
+                        if is_full
+                        else None
                     ),
                 ),
             )
@@ -331,15 +352,15 @@ def get_workload_spec(
         WorkloadSpec:
             Normalized workload specification derived from the Deployment.
     """
-
+    service_name: str = get_service_name(deployment, services)
     return WorkloadSpec(
         name=deployment.metadata.name,
-        service_name=get_service_name(deployment, services),
+        service_name=service_name,
         kind=K8DeploymentKind.DEPLOYMENT,
         replicas=deployment.spec.replicas or 0,
         hpa=_build_hpa_config(deployment, snapshot) if is_full else None,
         labels=deployment.spec.selector.match_labels if is_full else None,
-        containers=_build_container_specs(deployment, is_full=is_full),
+        containers=_build_container_specs(deployment, service_name, is_full=is_full),
     )
 
 

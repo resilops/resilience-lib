@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 import httpx
 
-from reslib.schemas.telemetry import EventPayload, MetricsPayload
+from reslib.schemas.telemetry import EventPayload, MetricPayload
 
 
 class BaseTelemetry(ABC):
@@ -21,7 +21,7 @@ class BaseTelemetry(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def emit_metrics(self, *, metrics: MetricsPayload) -> None:
+    def emit_metrics(self, *, metrics: MetricPayload) -> None:
         """
         Record a metrics payload.
 
@@ -42,7 +42,7 @@ class NoopTelemetry(BaseTelemetry):
     def emit_event(self, *, event: EventPayload) -> None:
         return None
 
-    def emit_metrics(self, *, metrics: MetricsPayload) -> None:
+    def emit_metrics(self, *, metrics: MetricPayload) -> None:
         return None
 
 
