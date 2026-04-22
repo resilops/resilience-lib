@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import math
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from cachetools import TTLCache
@@ -90,6 +91,46 @@ def get_deployment_conditions(deployment: V1Deployment) -> List[Optional[K8Condi
             )
         )
     return conditions
+
+
+def get_latest_pod_ready_time(pods: List[V1Pod]) -> Optional[datetime]:
+    """
+    Return the most recent Ready condition transition time across the given pods.
+    """
+    ready_times: List[datetime] = []
+
+    for pod in pods:
+        for condition in pod.status.conditions or []:
+            if (
+                condition.type == "Ready"
+                and condition.status == "True"
+                and getattr(condition, "last_transition_time", None) is not None
+            ):
+                ready_times.append(condition.last_transition_time)
+
+    if not ready_times:
+        return None
+
+    return max(ready_times)
+
+
+async def get_pods_by_labels(
+    *,
+    k8s: KubernetesClient,
+    namespace: str,
+    labels: Optional[Dict[str, str]],
+    pod_phase: Optional[str] = POD_RUNNING_STATUS,
+) -> List[V1Pod]:
+    """
+    Return pods in a namespace matching the given labels and optional phase.
+    """
+    selector = ",".join(f"{key}={value}" for key, value in (labels or {}).items())
+    pods = await k8s.list_namespaced_pod(namespace=namespace, label_selector=selector)
+
+    if pod_phase is None:
+        return [pod for pod in pods.items]
+
+    return [pod for pod in pods.items if pod.status.phase == pod_phase]
 
 
 def is_deployment_in_progress(deployment: V1Deployment) -> bool:
@@ -570,7 +611,7 @@ def get_hpa_resource_metric(
     return None
 
 
-def get_workload_pods(
+async def get_workload_pods(
     *,
     k8s: KubernetesClient,
     namespace: str,
@@ -580,41 +621,15 @@ def get_workload_pods(
     """
     Return pods belonging to a workload filtered by pod phase.
 
-    Kwargs:
-        k8s: Kubernetes client wrapper.
-        namespace: Namespace where the workload is deployed.
-        label_selector: Label selector to get pod.
-        pod_phase: Pod phase to filter by (default: Running).
-
-    Returns:
-        List of pods matching the workload selector and pod phase.
+    The Kubernetes Python client is synchronous, so the underlying API request
+    is offloaded to a worker thread by `KubernetesClient`.
     """
-    selector = ",".join(f"{key}={value}" for key, value in workload_spec.labels.items())
-    pods = k8s.v1_api.list_namespaced_pod(namespace=namespace, label_selector=selector)
-
-    if pod_phase is None:
-        return [pod for pod in pods.items]
-
-    return [pod for pod in pods.items if pod.status.phase == pod_phase]
-
-
-async def get_workload_pods_async(
-    *,
-    k8s: KubernetesClient,
-    namespace: str,
-    workload_spec: WorkloadSpec,
-    pod_phase: Optional[str] = POD_RUNNING_STATUS,
-) -> List[V1Pod]:
-    """
-    Async version of get_workload_pods to avoid blocking the event loop.
-    """
-    selector = ",".join(f"{key}={value}" for key, value in workload_spec.labels.items())
-    pods = await k8s.list_namespaced_pod(namespace=namespace, label_selector=selector)
-
-    if pod_phase is None:
-        return [pod for pod in pods.items]
-
-    return [pod for pod in pods.items if pod.status.phase == pod_phase]
+    return await get_pods_by_labels(
+        k8s=k8s,
+        namespace=namespace,
+        labels=workload_spec.labels,
+        pod_phase=pod_phase,
+    )
 
 
 def calculate_hpa_trigger(
@@ -707,7 +722,7 @@ async def raise_on_container_fail(
         ContainerCrashedError: If any container is in a crash, waiting with
         abnormal reason, or terminated with an unexpected reason or non-zero exit code.
     """
-    pods: List[V1Pod] = await get_workload_pods_async(
+    pods: List[V1Pod] = await get_workload_pods(
         k8s=k8s, workload_spec=workload_spec, namespace=namespace, pod_phase=None
     )
 
@@ -859,8 +874,21 @@ async def raise_on_desired_replicas(
     )
     desired_replicas = deployment.spec.replicas or 0
     ready_replicas = deployment.status.ready_replicas or 0
+    selector_labels = deployment.spec.selector.match_labels or {}
 
     if ready_replicas >= desired_replicas:
+        pods = await get_pods_by_labels(
+            k8s=k8s,
+            namespace=namespace,
+            labels=selector_labels,
+            pod_phase=None,
+        )
+        latest_pod_ready_time = get_latest_pod_ready_time(pods)
+        latest_pod_ready_time_iso = (
+            latest_pod_ready_time.isoformat()
+            if latest_pod_ready_time is not None
+            else None
+        )
         raise ReachedDesiredReplicaError(
             error_code="DESIRED_REPLICA_COUNT_REACHED",
             message="Deployment has reached or exceeded the desired replica count.",
@@ -876,6 +904,7 @@ async def raise_on_desired_replicas(
                     "ready_replicas": ready_replicas,
                     "desired_replicas": desired_replicas,
                     "at_or_above_desired": True,
+                    "latest_pod_ready_time": latest_pod_ready_time_iso,
                 },
             },
             fix_hint=(

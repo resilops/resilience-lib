@@ -11,10 +11,7 @@ from reslib.core.watchdog import watch_task_group, watch_until
 from reslib.k8s.client import KubernetesClient
 from reslib.k8s.exceptions import ReachedDesiredReplicaError
 from reslib.k8s.schema import WorkloadState
-from reslib.k8s.utils import (
-    raise_on_container_fail,
-    raise_on_desired_replicas,
-)
+from reslib.k8s.utils import raise_on_container_fail, raise_on_desired_replicas
 from reslib.rollbacks.schemas import PodRespawnTimeout
 from reslib.schemas.scenario import ResiliencyScenario
 

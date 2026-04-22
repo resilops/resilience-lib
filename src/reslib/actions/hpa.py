@@ -24,7 +24,6 @@ from reslib.k8s.utils import (
     calculate_hpa_trigger,
     get_hpa_resource_metric,
     get_workload_pods,
-    get_workload_pods_async,
     raise_on_container_fail,
     raise_on_hpa_scale,
 )
@@ -183,7 +182,9 @@ async def execute_cpu_stress(
             stream_resp.close()
 
 
-def select_pods_to_stress(k8s: KubernetesClient) -> Tuple[List[V1Pod], int]:
+async def select_pods_to_stress(
+    k8s: KubernetesClient,
+) -> Tuple[List[V1Pod], int]:
     """
     Determine which pods to stress and the CPU load percentage needed
     to trigger HPA scale-up.
@@ -191,7 +192,6 @@ def select_pods_to_stress(k8s: KubernetesClient) -> Tuple[List[V1Pod], int]:
     Returns:
         Tuple of (selected pods, cpu_percent per pod)
     """
-
     workload: WorkloadState = get_context("workload")
     scenario: ResiliencyScenario = get_context("scenario")
     namespace: str = scenario.template.namespace
@@ -212,39 +212,7 @@ def select_pods_to_stress(k8s: KubernetesClient) -> Tuple[List[V1Pod], int]:
     if pods_to_stress_count <= 0:
         return [], stress_cpu_percent
 
-    pods = get_workload_pods(k8s=k8s, namespace=namespace, workload_spec=workload.spec)
-    pods_to_stress = random.sample(pods, k=pods_to_stress_count)
-
-    return pods_to_stress, stress_cpu_percent
-
-
-async def select_pods_to_stress_async(
-    k8s: KubernetesClient,
-) -> Tuple[List[V1Pod], int]:
-    """
-    Async version of select_pods_to_stress to avoid blocking the event loop.
-    """
-    workload: WorkloadState = get_context("workload")
-    scenario: ResiliencyScenario = get_context("scenario")
-    namespace: str = scenario.template.namespace
-
-    hpa_metric: HPAMetricSpec = get_hpa_resource_metric(
-        hpa=workload.spec.hpa,
-        metric_source=HpaMetricSourceEnum.RESOURCE,
-        resource_type=HpaResourceTypeEnum.CPU,
-    )
-
-    pods_to_stress_count, stress_cpu_percent = calculate_hpa_trigger(
-        status=workload.runtime,
-        metric=hpa_metric,
-        idle_cpu_pct=scenario.template.idle_cpu_pct,
-        cpu_stress_threshold_pct=scenario.template.cpu_stress_threshold_pct,
-    )
-
-    if pods_to_stress_count <= 0:
-        return [], stress_cpu_percent
-
-    pods = await get_workload_pods_async(
+    pods = await get_workload_pods(
         k8s=k8s, namespace=namespace, workload_spec=workload.spec
     )
     pods_to_stress = random.sample(pods, k=pods_to_stress_count)
@@ -337,7 +305,7 @@ async def stress_cpu_hpa(**kwargs) -> Optional[Dict]:
     workload: WorkloadState = get_context("workload")
 
     # Select pods and compute stress load
-    pods_to_stress, stress_cpu_percent = await select_pods_to_stress_async(k8s=k8s)
+    pods_to_stress, stress_cpu_percent = await select_pods_to_stress(k8s=k8s)
     if not pods_to_stress:
         logger.info("Workload already exceeds HPA CPU threshold; skipping stress")
         return {}

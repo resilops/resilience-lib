@@ -67,3 +67,8 @@ async def send_timed_request(client: httpx.AsyncClient, endpoint: str) -> TimedR
     response.raise_for_status()
 
     return TimedResponse(response=response, latency=latency, timestamp=timestamp)
+
+
+def utc_now_iso() -> str:
+    """Return the current UTC time serialized as ISO 8601."""
+    return datetime.now(timezone.utc).isoformat()

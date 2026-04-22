@@ -13,7 +13,7 @@ from reslib.k8s.exceptions import PodDeletionTimeoutError, PodsSelectionError
 from reslib.k8s.schema import WorkloadState
 from reslib.k8s.utils import (
     get_pod_termination_timeout,
-    get_workload_pods_async,
+    get_workload_pods,
     pod_exists,
 )
 from reslib.schemas.scenario import ResiliencyScenario
@@ -149,7 +149,7 @@ async def terminate_pods(**kwargs) -> Dict:
     # 3. List candidate pods
     k8s = KubernetesClient()
 
-    pods = await get_workload_pods_async(
+    pods = await get_workload_pods(
         k8s=k8s, namespace=namespace, workload_spec=workload.spec
     )
     candidate_pods: List[V1Pod] = random.sample(pods, k=pods_to_terminate)
