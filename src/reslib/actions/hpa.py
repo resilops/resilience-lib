@@ -1,16 +1,18 @@
 import asyncio
 import logging
 import random
+from datetime import datetime, timezone
 from typing import Any, Awaitable, Dict, List, Optional, Tuple
 
-from kubernetes import client, stream
+from kubernetes import stream
 from kubernetes.client import V1Pod
 
 from reslib.actions.schemas import PodStressSchema
 from reslib.constants import (
     CONTAINER_CRASH_MONITOR_TASK_NAME,
     CPU_STRESS_TASK_NAME_PREFIX,
-    HPA_SCALE_MONITOR_TASK_NAME,
+    HPA_SCALE_EVENT_MONITOR_TASK_NAME,
+    HPA_SCALE_POD_READY_MONITOR_TASK_NAME,
     HPA_SCALEUP_TASK_BUFFER_TIME,
     HpaMetricSourceEnum,
     HpaResourceTypeEnum,
@@ -18,14 +20,15 @@ from reslib.constants import (
 from reslib.core.context import get_context, set_context
 from reslib.core.watchdog import watch_task_group, watch_until
 from reslib.k8s.client import KubernetesClient
-from reslib.k8s.exceptions import CPUStressCommandFailed, HpaScaledError
+from reslib.k8s.exceptions import CPUStressCommandFailed, HpaScalePodReadyError
 from reslib.k8s.schema import HPAMetricSpec, WorkloadState
 from reslib.k8s.utils import (
     calculate_hpa_trigger,
     get_hpa_resource_metric,
     get_workload_pods,
     raise_on_container_fail,
-    raise_on_hpa_scale,
+    raise_on_pod_ready_after_hpa_scale,
+    set_hpa_scale_event_context,
 )
 from reslib.schemas.scenario import ResiliencyScenario
 
@@ -85,7 +88,7 @@ async def execute_cpu_stress(
 
     stream_resp = None
     try:
-        stream_api = client.CoreV1Api(k8s.new_api())
+        stream_api = k8s.new_v1_api()
         stream_resp = await asyncio.to_thread(
             stream.stream,
             stream_api.connect_get_namespaced_pod_exec,
@@ -253,23 +256,33 @@ def _build_stress_tasks(
     tasks.extend(
         [
             (
+                # Set hpa scale event context
+                set_hpa_scale_event_context(
+                    k8s=k8s,
+                    namespace=namespace,
+                    workload=workload,
+                    not_before=datetime.now(timezone.utc),
+                ),
+                HPA_SCALE_EVENT_MONITOR_TASK_NAME,
+            ),
+            (
                 # Stop when there is a scaling
                 watch_until(
-                    condition=raise_on_hpa_scale,
+                    condition=raise_on_pod_ready_after_hpa_scale,
                     timeout=args.max_stress_duration_seconds,
                     poll_interval=5,
                     k8s=k8s,
                     namespace=namespace,
                     workload=workload,
                 ),
-                HPA_SCALE_MONITOR_TASK_NAME,
+                HPA_SCALE_POD_READY_MONITOR_TASK_NAME,
             ),
             (
                 # Fail fast in case of any errors
                 watch_until(
                     condition=raise_on_container_fail,
                     timeout=args.max_stress_duration_seconds,
-                    poll_interval=5,
+                    poll_interval=10,
                     k8s=k8s,
                     workload_spec=workload.spec,
                     namespace=namespace,
@@ -325,12 +338,14 @@ async def stress_cpu_hpa(**kwargs) -> Optional[Dict]:
             return_when=asyncio.FIRST_EXCEPTION,
             raise_exception=True,
         )
-    except HpaScaledError as exc:
+    except HpaScalePodReadyError as exc:
         logger.info("HPA scaleup success")
         observed = exc.context.get("observed")
-        set_context("stress_context", {"workload": workload, **observed})
+        scale_event = get_context("hpa_scale_event", raise_error=False)
+        context = {**observed, **scale_event}
+        set_context("stress_context", {"workload": workload, **context})
         return {
             "result": "hpa_scale_up_detected",
             "reason": "CPU stress triggered HPA scale-up",
-            "observed": observed,
+            "observed": context,
         }

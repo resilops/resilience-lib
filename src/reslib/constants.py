@@ -17,7 +17,8 @@ POD_WAITING_REASONS_OK: Tuple = ("PodInitializing", "ContainerCreating")
 POD_TERMINATED_REASONS_OK: Tuple = ("Completed", None)
 
 CONTAINER_CRASH_MONITOR_TASK_NAME: str = "monitor:container:crash"
-HPA_SCALE_MONITOR_TASK_NAME: str = "monitor:hpa:scale"
+HPA_SCALE_POD_READY_MONITOR_TASK_NAME: str = "monitor:hpa:scale:pod:ready"
+HPA_SCALE_EVENT_MONITOR_TASK_NAME: str = "monitor:hpa:event:scale"
 CPU_STRESS_TASK_NAME_PREFIX: str = "action:stress:pod:cpu"
 REACHED_DESIRED_REPLICA_TASK_NAME: str = "monitor:replicas:desired"
 REPLICAS_RESTORED_TASK_NAME: str = "monitor:replicas:restored"

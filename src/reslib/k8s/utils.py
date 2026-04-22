@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from cachetools import TTLCache
 from cachetools.keys import hashkey
+from kubernetes import watch
 from kubernetes.client import (
     V1Deployment,
     V1Pod,
@@ -30,12 +31,12 @@ from reslib.constants import (
     K8DeploymentKind,
     WorkloadStatusEnum,
 )
-from reslib.core.context import get_context
+from reslib.core.context import get_context, set_context
 from reslib.k8s.client import KubernetesClient
 from reslib.k8s.exceptions import (
     ContainerCrashedError,
     HpaNotConfiguredError,
-    HpaScaledError,
+    HpaScalePodReadyError,
     ReachedDesiredReplicaError,
     ReplicasRestoredError,
     WorkloadNotFound,
@@ -795,49 +796,136 @@ async def raise_on_container_fail(
                 )
 
 
-async def raise_on_hpa_scale(
-    k8s: KubernetesClient, namespace: str, workload: WorkloadState
-) -> Optional[Dict[str, int]]:
+def _extract_event_timestamp(event_obj: Any) -> Optional[datetime]:
+    """Extract the best available timestamp from a Kubernetes Event object."""
+    if getattr(event_obj, "event_time", None):
+        return event_obj.event_time
+
+    series = getattr(event_obj, "series", None)
+    if series and getattr(series, "last_observed_time", None):
+        return series.last_observed_time
+
+    if getattr(event_obj, "last_timestamp", None):
+        return event_obj.last_timestamp
+
+    if getattr(event_obj, "first_timestamp", None):
+        return event_obj.first_timestamp
+
+    return None
+
+
+async def set_hpa_scale_event_context(
+    k8s: KubernetesClient,
+    namespace: str,
+    workload: WorkloadState,
+    not_before: Optional[datetime] = None,
+) -> Optional[Dict]:
     """
-    Check if a deployment's ready replicas have increased above the starting count.
+    Watch Kubernetes Events for HPA scale-up (SuccessfulRescale), then
+    store the event timestamp in context.
 
     Args:
         k8s: Kubernetes client instance.
+        namespace: Namespace of the HPA/workload.
         workload: Workload state.
-        namespace: Kubernetes namespace of the deployment.
+        not_before: Not before timestamp.
 
     Returns:
-        Dict with 'before' state and 'after' state keys if replicas increased,
-        otherwise None.
+        Dict with event metadata if a matching event is found, otherwise None.
+    """
+    hpa_name = workload.spec.hpa.name
+    api = k8s.new_v1_api()
+    w = watch.Watch()
+
+    field_selector = (
+        f"involvedObject.kind=HorizontalPodAutoscaler,"
+        f"involvedObject.name={hpa_name}"
+    )
+
+    def _watch() -> Optional[Dict]:
+        try:
+            for evt in w.stream(
+                api.list_namespaced_event,
+                namespace=namespace,
+                field_selector=field_selector,
+                timeout_seconds=0,
+            ):
+                obj = evt["object"]
+                if getattr(obj, "reason", None) != "SuccessfulRescale":
+                    continue
+
+                scale_event_time = _extract_event_timestamp(obj)
+                if scale_event_time is None:
+                    continue
+
+                if not_before and scale_event_time < not_before:
+                    continue
+
+                scale_event_time_iso = scale_event_time.isoformat()
+                payload = {
+                    "hpa_name": hpa_name,
+                    "reason": obj.reason,
+                    "scale_event_timestamp": scale_event_time_iso,
+                }
+                set_context("hpa_scale_event", payload)
+                return payload
+
+            return None
+        finally:
+            w.stop()
+
+    return await asyncio.to_thread(_watch)
+
+
+async def raise_on_pod_ready_after_hpa_scale(
+    k8s: KubernetesClient,
+    namespace: str,
+    workload: WorkloadState,
+) -> Optional[Dict[str, int]]:
+    """
+    Check if the deployment has reached the scaled ready replica target.
+
+    Args:
+        k8s: Kubernetes client instance.
+        namespace: Kubernetes namespace of the deployment.
+        workload: Workload state.
+
+    Returns:
+        Dict with replica counts if target is reached, otherwise None.
 
     Raises:
-        HpaScaledError: If the number of ready replicas exceeds start_replicas.
+        HpaScalePodReadyError: If the deployment reaches the target ready replica count.
     """
     deployment = await k8s.read_namespaced_deployment(
-        name=workload.spec.name, namespace=namespace
+        name=workload.spec.name,
+        namespace=namespace,
     )
-    start_replicas = workload.runtime.ready_replicas
-    current_replicas = deployment.status.ready_replicas or 0
 
-    if current_replicas > start_replicas:
-        hpa = await k8s.read_namespaced_horizontal_pod_autoscaler(
-            name=workload.spec.hpa.name, namespace=namespace
-        )
-        raise HpaScaledError(
-            error_code="HPA_SCALE_DETECTED",
-            message="Workload replicas increased due to HPA scaling.",
+    start_replicas = workload.runtime.ready_replicas
+    desired_replicas = deployment.status.replicas or 0
+    ready_replicas = deployment.status.ready_replicas or 0
+
+    # Optional guard: only treat this as scale-up readiness if the deployment
+    # has actually scaled above the initial size.
+    if start_replicas < desired_replicas <= ready_replicas:
+        raise HpaScalePodReadyError(
+            error_code="HPA_SCALED_PODS_READY",
+            message="Scaled pods became Ready.",
             namespace=namespace,
             workload=workload.spec.name,
             context={
-                "rule": "current_ready_replicas <= initial_ready_replicas",
+                "rule": (
+                    "ready_replicas >= deployment_replicas and "
+                    "deployment_replicas > initial_replicas"
+                ),
                 "inputs": {
                     "workload_name": workload.spec.name,
                     "namespace": namespace,
                 },
                 "observed": {
                     "before_replicas": start_replicas,
-                    "after_replicas": current_replicas,
-                    "average_utilization": get_hpa_current_average_utilization(hpa=hpa),
+                    "desired_replicas": desired_replicas,
+                    "ready_replicas": ready_replicas,
                 },
             },
             retryable=False,

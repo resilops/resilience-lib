@@ -1,7 +1,7 @@
 import asyncio
 from typing import Optional
 
-from kubernetes import client, config as k8config
+from kubernetes import client, config as k8config, watch
 from kubernetes.config.config_exception import ConfigException
 
 
@@ -40,6 +40,16 @@ class KubernetesClient:
     def new_api() -> client.ApiClient:
         """Create a fresh ApiClient instance for one-off calls (e.g. exec/stream)."""
         return client.ApiClient()
+
+    @classmethod
+    def new_v1_api(cls) -> client.CoreV1Api:
+        """Create a fresh CoreV1Api for one-off calls that should not reuse state."""
+        return client.CoreV1Api(cls.new_api())
+
+    @staticmethod
+    def new_watch() -> watch.Watch:
+        """Create a new Kubernetes watch instance."""
+        return watch.Watch()
 
     @property
     def v1_api(self) -> client.CoreV1Api:

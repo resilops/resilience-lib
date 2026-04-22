@@ -41,12 +41,16 @@ async def scenario_context(**data: Any):
         _scenario_ctx.reset(token)
 
 
-def get_context(key: str) -> Any:
+def get_context(
+    key: str, default: Optional[Any] = None, raise_error: bool = True
+) -> Any:
     """
     Get a value from the current context dict by key.
 
     Args:
         key: The key to look up in the context.
+        default: The default value to return if key is not found.
+        raise_error: Whether to raise an error if the key is not found.
 
     Returns:
         The value associated with the key, or the default if not found.
@@ -59,10 +63,10 @@ def get_context(key: str) -> Any:
     except LookupError:
         raise ScenarioContextError("ScenarioContext is not active")
 
-    if key not in ctx:
+    if key not in ctx and raise_error:
         raise ScenarioContextError(f"Context key '{key}' is not set")
 
-    return ctx[key]
+    return ctx.get(key, default)
 
 
 def set_context(key: str, value: Any) -> None:

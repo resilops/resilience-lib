@@ -69,7 +69,11 @@ class InsufficientMemoryError(BaseError):
     pass
 
 
-class HpaScaledError(BaseError):
+class HpaScalePodReadyError(BaseError):
+    pass
+
+
+class HpaScaleDetectedError(BaseError):
     pass
 
 
