@@ -1,0 +1,350 @@
+import asyncio
+from typing import List, Optional
+
+from cachetools import TTLCache
+from cachetools.keys import hashkey
+from kubernetes.client import V1Deployment, V1Probe, V1Service
+from kubernetes.client.exceptions import ApiException
+
+from reslib.constants import (
+    DEPLOYMENT_CONDITION_AVAILABLE,
+    DEPLOYMENT_CONDITION_PROGRESSING,
+    DEPLOYMENT_STATUS_MIN_RS_AVAILABLE,
+    DEPLOYMENT_STATUS_PROGRESS_DEADLINE,
+    DEPLOYMENT_STATUS_RS_AVAILABLE,
+    K8DeploymentKind,
+    WorkloadStatusEnum,
+)
+from reslib.k8s.client import KubernetesClient
+from reslib.k8s.exceptions import WorkloadNotFound
+from reslib.k8s.schema import (
+    ContainerHealthSpec,
+    ContainerSpec,
+    HPAConfig,
+    HPAMetricSpec,
+    K8Condition,
+    PDBConfig,
+    ProbeHttpGet,
+    ResourceRequirements,
+    WorkloadPolicies,
+    WorkloadRuntimeState,
+    WorkloadSpec,
+    WorkloadState,
+)
+from reslib.k8s.snapshot import NamespaceSnapshot
+
+_namespace_cache = TTLCache(maxsize=64, ttl=30)
+_namespace_cache_lock = asyncio.Lock()
+
+
+def get_deployment_conditions(deployment: V1Deployment) -> List[Optional[K8Condition]]:
+    """Convert Kubernetes Deployment conditions into JSON-friendly models."""
+    conditions: List[Optional[K8Condition]] = []
+    for condition in deployment.status.conditions or []:
+        conditions.append(
+            K8Condition(
+                type=condition.type,
+                status=condition.status,
+                reason=getattr(condition, "reason", None),
+                message=getattr(condition, "message", None),
+                last_transition_time=getattr(condition, "last_transition_time", None),
+            )
+        )
+    return conditions
+
+
+def is_deployment_in_progress(deployment: V1Deployment) -> bool:
+    """Return whether a deployment rollout is still progressing."""
+    for condition in deployment.status.conditions or []:
+        if (
+            condition.type == DEPLOYMENT_CONDITION_PROGRESSING
+            and condition.status == "True"
+            and condition.reason != DEPLOYMENT_STATUS_RS_AVAILABLE
+        ):
+            return True
+    return False
+
+
+def is_deployment_available(deployment: V1Deployment) -> bool:
+    """Return whether a deployment is currently available."""
+    for condition in deployment.status.conditions or []:
+        if (
+            condition.type == DEPLOYMENT_CONDITION_AVAILABLE
+            and condition.status == "True"
+            and condition.reason == DEPLOYMENT_STATUS_MIN_RS_AVAILABLE
+        ):
+            return True
+    return False
+
+
+def is_deployment_faulty(deployment: V1Deployment) -> bool:
+    """Return whether a deployment rollout failed its progress deadline."""
+    for condition in deployment.status.conditions or []:
+        if (
+            condition.type == DEPLOYMENT_CONDITION_PROGRESSING
+            and condition.status == "False"
+            and condition.reason == DEPLOYMENT_STATUS_PROGRESS_DEADLINE
+        ):
+            return True
+    return False
+
+
+async def get_namespace_policies_snapshot(
+    k8s: KubernetesClient, namespace: str
+) -> NamespaceSnapshot:
+    """Fetch and cache namespace-scoped HPA and PDB information."""
+    cache_key = hashkey(k8s, namespace)
+    cached_snapshot = _namespace_cache.get(cache_key)
+    if cached_snapshot is not None:
+        return cached_snapshot
+
+    hpa_list, pdb_list = await asyncio.gather(
+        k8s.list_namespaced_horizontal_pod_autoscaler(namespace=namespace),
+        k8s.list_namespaced_pod_disruption_budget(namespace=namespace),
+    )
+
+    snapshot = NamespaceSnapshot(
+        hpas={hpa.spec.scale_target_ref.name: hpa for hpa in hpa_list.items},
+        pdbs=pdb_list.items,
+    )
+
+    async with _namespace_cache_lock:
+        existing_snapshot = _namespace_cache.get(cache_key)
+        if existing_snapshot is not None:
+            return existing_snapshot
+        _namespace_cache[cache_key] = snapshot
+
+    return snapshot
+
+
+def _build_probe_http_get(
+    probe: Optional[V1Probe],
+    service_name: Optional[str],
+    namespace: Optional[str],
+) -> Optional[ProbeHttpGet]:
+    """Build a normalized HTTP probe endpoint definition."""
+    if not probe or not probe.http_get:
+        return None
+
+    http_get = probe.http_get
+    host = getattr(http_get, "host", None)
+    if not host and service_name and namespace:
+        host = f"{service_name}.{namespace}.svc.cluster.local"
+
+    return ProbeHttpGet(
+        path=getattr(http_get, "path", None) or "/",
+        port=getattr(http_get, "port", None),
+        host=host,
+        scheme=(getattr(http_get, "scheme", None) or "HTTP").lower(),
+    )
+
+
+def _build_container_specs(
+    deployment: V1Deployment,
+    service_name: Optional[str],
+    *,
+    include_resources: bool,
+) -> List[ContainerSpec]:
+    """Build container models from a deployment pod template."""
+    containers: List[ContainerSpec] = []
+    pod_spec = deployment.spec.template.spec
+    namespace = deployment.metadata.namespace
+
+    for container in pod_spec.containers or []:
+        resources = getattr(container, "resources", None)
+        containers.append(
+            ContainerSpec(
+                name=container.name,
+                resources=(
+                    ResourceRequirements(
+                        requests=getattr(resources, "requests", None),
+                        limits=getattr(resources, "limits", None),
+                    )
+                    if resources and include_resources
+                    else None
+                ),
+                health=ContainerHealthSpec(
+                    readiness=_build_probe_http_get(
+                        getattr(container, "readiness_probe", None),
+                        service_name,
+                        namespace,
+                    ),
+                    liveness=_build_probe_http_get(
+                        getattr(container, "liveness_probe", None),
+                        service_name,
+                        namespace,
+                    ),
+                    startup=(
+                        _build_probe_http_get(
+                            getattr(container, "startup_probe", None),
+                            service_name,
+                            namespace,
+                        )
+                        if include_resources
+                        else None
+                    ),
+                ),
+            )
+        )
+
+    return containers
+
+
+def _build_hpa_config(
+    deployment: V1Deployment,
+    snapshot: Optional[NamespaceSnapshot],
+) -> Optional[HPAConfig]:
+    """Build HPA config for a deployment using the namespace snapshot."""
+    hpa = snapshot.get_hpa(deployment) if snapshot else None
+    if hpa is None:
+        return None
+
+    return HPAConfig(
+        name=hpa.metadata.name,
+        min_replicas=hpa.spec.min_replicas,
+        max_replicas=hpa.spec.max_replicas,
+        metrics=[
+            HPAMetricSpec(type=metric.type, resource=metric.resource.to_dict())
+            for metric in (hpa.spec.metrics or [])
+        ],
+    )
+
+
+def get_service_name(
+    deployment: V1Deployment,
+    services: Optional[List[V1Service]] = None,
+) -> Optional[str]:
+    """Return the deterministic service name that targets the deployment pods."""
+    if not services:
+        return None
+
+    pod_labels = deployment.spec.template.metadata.labels or {}
+    matching_service_names = [
+        service.metadata.name
+        for service in services
+        if service.spec.selector
+        and all(
+            pod_labels.get(key) == value for key, value in service.spec.selector.items()
+        )
+    ]
+    return min(matching_service_names) if matching_service_names else None
+
+
+def get_workload_spec(
+    *,
+    deployment: V1Deployment,
+    snapshot: Optional[NamespaceSnapshot] = None,
+    services: Optional[List[V1Service]] = None,
+    is_full: bool = True,
+) -> WorkloadSpec:
+    """Build a normalized workload spec from a deployment."""
+    service_name = get_service_name(deployment, services)
+    return WorkloadSpec(
+        name=deployment.metadata.name,
+        service_name=service_name,
+        kind=K8DeploymentKind.DEPLOYMENT,
+        replicas=deployment.spec.replicas or 0,
+        hpa=_build_hpa_config(deployment, snapshot) if is_full else None,
+        labels=deployment.spec.selector.match_labels if is_full else None,
+        containers=_build_container_specs(
+            deployment,
+            service_name,
+            include_resources=is_full,
+        ),
+    )
+
+
+def get_workload_policies(
+    snapshot: NamespaceSnapshot,
+    deployment: V1Deployment,
+) -> WorkloadPolicies:
+    """Build workload policies from snapshot data."""
+    pod_labels = deployment.spec.template.metadata.labels or {}
+    pdb = snapshot.get_pdb(pod_labels)
+    return WorkloadPolicies(
+        pdb=(
+            PDBConfig(
+                min_available=pdb.spec.min_available,
+                max_unavailable=pdb.spec.max_unavailable,
+            )
+            if pdb
+            else None
+        )
+    )
+
+
+def get_workload_runtime(
+    deployment: V1Deployment,
+    is_full: bool = True,
+) -> WorkloadRuntimeState:
+    """Build the current runtime state for a deployment."""
+    if is_deployment_faulty(deployment):
+        status = WorkloadStatusEnum.degraded
+    elif is_deployment_in_progress(deployment):
+        status = WorkloadStatusEnum.reconciling
+    elif is_deployment_available(deployment):
+        status = WorkloadStatusEnum.healthy
+    else:
+        status = WorkloadStatusEnum.unavailable
+
+    return WorkloadRuntimeState(
+        ready_replicas=deployment.status.ready_replicas or 0,
+        status=status,
+        generation=deployment.metadata.generation,
+        observed_generation=deployment.status.observed_generation,
+        conditions=get_deployment_conditions(deployment) if is_full else None,
+    )
+
+
+async def get_workload(
+    *,
+    namespace: str,
+    name: str,
+    k8s: Optional[KubernetesClient] = None,
+) -> WorkloadState:
+    """Fetch a single workload by name and build its normalized state."""
+    k8s = k8s or KubernetesClient()
+    snapshot, service_list = await asyncio.gather(
+        get_namespace_policies_snapshot(k8s=k8s, namespace=namespace),
+        k8s.list_namespaced_service(namespace=namespace),
+    )
+
+    try:
+        deployment = await k8s.read_namespaced_deployment(
+            name=name,
+            namespace=namespace,
+        )
+    except ApiException as exc:
+        if exc.status == 404:
+            raise WorkloadNotFound(
+                error_code="WORKLOAD_NOT_FOUND",
+                message="Requested workload deployment was not found.",
+                namespace=namespace,
+                workload=name,
+                context={
+                    "rule": "deployment exists in namespace",
+                    "inputs": {
+                        "deployment": name,
+                        "namespace": namespace,
+                    },
+                    "observed": {
+                        "deployment_found": False,
+                    },
+                },
+                fix_hint=(
+                    "Verify the deployment name and namespace, or ensure the workload "
+                    "has been created before running this operation."
+                ),
+                retryable=False,
+            )
+        raise
+
+    return WorkloadState(
+        spec=get_workload_spec(
+            deployment=deployment,
+            snapshot=snapshot,
+            services=service_list.items,
+        ),
+        policies=get_workload_policies(snapshot=snapshot, deployment=deployment),
+        runtime=get_workload_runtime(deployment),
+    )

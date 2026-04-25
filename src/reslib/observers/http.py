@@ -11,7 +11,7 @@ from reslib.core.context import get_context
 from reslib.core.watchdog import watch_task_group
 from reslib.k8s.client import KubernetesClient
 from reslib.k8s.schema import WorkloadRuntimeState
-from reslib.k8s.utils import get_workload_runtime
+from reslib.k8s.workloads import get_workload_runtime
 from reslib.observers.schemas import HTTPLatencyArgsTemplate
 from reslib.schemas.scenario import ResiliencyScenario
 from reslib.schemas.telemetry import MetricPayload

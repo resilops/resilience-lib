@@ -9,7 +9,7 @@ from reslib.constants import PHASE_EXECUTION_MAX_TIMEOUT, AsyncFunc, EventEnum
 from reslib.core.context import ObserverContext, ScenarioContext, get_context
 from reslib.exceptions import BaseError
 from reslib.k8s.schema import WorkloadState
-from reslib.k8s.utils import get_workload
+from reslib.k8s.workloads import get_workload
 from reslib.logging import setup_logging
 from reslib.runtime import resolve as resolver
 from reslib.runtime.phases import ExecutionPhase

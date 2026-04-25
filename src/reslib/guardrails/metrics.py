@@ -3,8 +3,8 @@ from kubernetes.client.rest import ApiException
 from reslib.core.context import get_context
 from reslib.k8s.client import KubernetesClient
 from reslib.k8s.exceptions import MetricsServerUnavailableError
+from reslib.k8s.pods import get_workload_pods
 from reslib.k8s.schema import WorkloadState
-from reslib.k8s.utils import get_workload_pods
 from reslib.schemas.scenario import ResiliencyScenario
 
 

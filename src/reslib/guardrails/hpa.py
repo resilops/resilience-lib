@@ -11,11 +11,8 @@ from reslib.k8s.exceptions import (
     PodsToStressExceededError,
     WorkloadAtMaxError,
 )
+from reslib.k8s.scaling import calculate_hpa_trigger, get_hpa_resource_metric
 from reslib.k8s.schema import HPAMetricSpec, WorkloadState
-from reslib.k8s.utils import (
-    calculate_hpa_trigger,
-    get_hpa_resource_metric,
-)
 from reslib.schemas.scenario import ResiliencyScenario
 
 logger = logging.getLogger(__name__)

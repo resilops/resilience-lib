@@ -8,7 +8,7 @@ from reslib.k8s.schema import (
     NamespaceState,
     WorkloadState,
 )
-from reslib.k8s.utils import get_workload_runtime, get_workload_spec
+from reslib.k8s.workloads import get_workload_runtime, get_workload_spec
 
 
 def discover_workloads(

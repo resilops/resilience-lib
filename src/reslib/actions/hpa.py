@@ -11,7 +11,6 @@ from reslib.actions.schemas import PodStressSchema
 from reslib.constants import (
     CONTAINER_CRASH_MONITOR_TASK_NAME,
     CPU_STRESS_TASK_NAME_PREFIX,
-    HPA_SCALE_EVENT_MONITOR_TASK_NAME,
     HPA_SCALE_POD_READY_MONITOR_TASK_NAME,
     HPA_SCALEUP_TASK_BUFFER_TIME,
     HpaMetricSourceEnum,
@@ -21,15 +20,15 @@ from reslib.core.context import get_context, set_context
 from reslib.core.watchdog import watch_task_group, watch_until
 from reslib.k8s.client import KubernetesClient
 from reslib.k8s.exceptions import CPUStressCommandFailed, HpaScalePodReadyError
-from reslib.k8s.schema import HPAMetricSpec, WorkloadState
-from reslib.k8s.utils import (
+from reslib.k8s.pods import get_workload_pods, raise_on_container_fail
+from reslib.k8s.scaling import (
+    HPA_SCALE_UP_EVENT_CONTEXT_KEY,
     calculate_hpa_trigger,
     get_hpa_resource_metric,
-    get_workload_pods,
-    raise_on_container_fail,
-    raise_on_pod_ready_after_hpa_scale,
-    set_hpa_scale_event_context,
+    raise_on_scaled_pods_ready,
+    wait_for_hpa_scale_up_event,
 )
+from reslib.k8s.schema import HPAMetricSpec, WorkloadState
 from reslib.schemas.scenario import ResiliencyScenario
 
 logger = logging.getLogger(__name__)
@@ -38,7 +37,7 @@ STDOUT_CHANNEL = 1
 STDERR_CHANNEL = 2
 
 
-async def execute_cpu_stress(
+async def run_cpu_stress(
     *,
     k8s: KubernetesClient,
     pod: V1Pod,
@@ -47,24 +46,25 @@ async def execute_cpu_stress(
     timeout: int,
 ) -> Tuple[str, str]:
     """
-    Apply CPU stress to a pod using `stress-ng`.
+    Execute `stress-ng` inside a pod to apply CPU pressure.
 
     Args:
-        k8s: Kubernetes client.
-        pod: Target pod.
-        cpu_percent: CPU load percentage per CPU.
-        container_name: Optional container name.
-        timeout: Duration in seconds.
+        k8s: Kubernetes client used to open the exec session.
+        pod: Target pod that will run the stress command.
+        cpu_percent: CPU load percentage to apply.
+        container_name: Optional target container within the pod.
+        timeout: Maximum stress duration in seconds.
 
     Returns:
-        Tuple of (stdout, stderr) from stress command.
+        Tuple of stdout and stderr collected from the exec session.
 
     Raises:
-        CPUStressCommandFailed: If stress command fails or outputs stderr.
+        CPUStressCommandFailed: If the stress command writes to stderr.
     """
     scenario: ResiliencyScenario = get_context("scenario")
     namespace = scenario.template.namespace
     workload_name = scenario.template.workload
+
     command = [
         "stress-ng",
         "--cpu",
@@ -74,17 +74,6 @@ async def execute_cpu_stress(
         "--timeout",
         f"{timeout}s",
     ]
-
-    logger.info(
-        "Starting CPU stress",
-        extra={
-            "pod": pod.metadata.name,
-            "namespace": pod.metadata.namespace,
-            "container": container_name,
-            "cpu_percent": cpu_percent,
-            "duration": timeout,
-        },
-    )
 
     stream_resp = None
     try:
@@ -114,74 +103,14 @@ async def execute_cpu_stress(
                 message="CPU stress command returned an error output.",
                 namespace=namespace,
                 workload=workload_name,
-                context={
-                    "rule": "stress-ng produces no stderr output",
-                    "observed": {
-                        "pod": pod.metadata.name,
-                        "container": container_name,
-                        "stderr": stderr,
-                    },
-                },
-                fix_hint=(
-                    "Inspect stderr output and ensure container resources "
-                    "permit CPU stress execution."
-                ),
+                context={"observed": {"stderr": stderr}},
                 retryable=False,
             )
 
-        logger.info(
-            "Completed CPU stress",
-            extra={"pod": pod.metadata.name, "container": container_name},
-        )
         return stdout, stderr
-    except TimeoutError as exc:
-        raise CPUStressCommandFailed(
-            error_code="CPU_STRESS_TIMEOUT",
-            message="CPU stress execution exceeded allowed timeout.",
-            namespace=namespace,
-            workload=workload_name,
-            context={
-                "rule": "stress command completes within timeout_seconds",
-                "observed": {
-                    "pod": pod.metadata.name,
-                    "namespace": pod.metadata.namespace,
-                    "container": container_name,
-                    "timeout_seconds": timeout,
-                },
-            },
-            fix_hint=(
-                "Increase timeout_seconds or reduce CPU stress intensity "
-                "to allow the command to complete."
-            ),
-            retryable=True,
-        ) from exc
-    except Exception as exc:
-        raise CPUStressCommandFailed(
-            error_code="CPU_STRESS_EXECUTION_FAILED",
-            message="CPU stress command failed during pod execution.",
-            namespace=namespace,
-            workload=workload_name,
-            context={
-                "rule": "stress-ng command executes successfully",
-                "observed": {
-                    "pod": pod.metadata.name,
-                    "namespace": pod.metadata.namespace,
-                    "container": container_name,
-                    "exception_type": type(exc).__name__,
-                    "exception_message": str(exc),
-                },
-            },
-            fix_hint=(
-                "Verify that `stress-ng` is installed in the container and "
-                "the pod allows exec operations."
-            ),
-            retryable=True,
-        ) from exc
+
     finally:
         if stream_resp is not None:
-            logger.info(
-                f"Stopping the pod exec stress command for pod: {pod.metadata.name}"
-            )
             stream_resp.close()
 
 
@@ -189,11 +118,13 @@ async def select_pods_to_stress(
     k8s: KubernetesClient,
 ) -> Tuple[List[V1Pod], int]:
     """
-    Determine which pods to stress and the CPU load percentage needed
-    to trigger HPA scale-up.
+    Select workload pods and compute the CPU load needed to trigger HPA scale-up.
+
+    Args:
+        k8s: Kubernetes client used to list workload pods.
 
     Returns:
-        Tuple of (selected pods, cpu_percent per pod)
+        Tuple of selected pods and CPU load percentage per pod.
     """
     workload: WorkloadState = get_context("workload")
     scenario: ResiliencyScenario = get_context("scenario")
@@ -218,30 +149,30 @@ async def select_pods_to_stress(
     pods = await get_workload_pods(
         k8s=k8s, namespace=namespace, workload_spec=workload.spec
     )
-    pods_to_stress = random.sample(pods, k=pods_to_stress_count)
-
-    return pods_to_stress, stress_cpu_percent
+    return random.sample(pods, k=pods_to_stress_count), stress_cpu_percent
 
 
-def _build_stress_tasks(
+def build_hpa_stress_tasks(
     k8s: KubernetesClient,
     pods_to_stress: List[V1Pod],
     stress_cpu_percent: int,
     args: PodStressSchema,
 ) -> List[Tuple[Awaitable[Any], str]]:
     """
-    Build a list of stress and HPA monitoring coroutines with task names.
+    Build the concurrent stress and monitor tasks for the HPA experiment.
 
-    Returns:
-        List of tuples: (coroutine, task_name)
+    The returned tasks include:
+      - one CPU stress task per selected pod
+      - one monitor that stops on scaled pods becoming Ready
+      - one fail-fast monitor for container crashes
     """
     workload: WorkloadState = get_context("workload")
     scenario: ResiliencyScenario = get_context("scenario")
     namespace: str = scenario.template.namespace
 
-    tasks: List[Tuple[Awaitable[Any], str]] = [
+    tasks = [
         (
-            execute_cpu_stress(
+            run_cpu_stress(
                 k8s=k8s,
                 pod=pod,
                 cpu_percent=stress_cpu_percent,
@@ -256,19 +187,8 @@ def _build_stress_tasks(
     tasks.extend(
         [
             (
-                # Set hpa scale event context
-                set_hpa_scale_event_context(
-                    k8s=k8s,
-                    namespace=namespace,
-                    workload=workload,
-                    not_before=datetime.now(timezone.utc),
-                ),
-                HPA_SCALE_EVENT_MONITOR_TASK_NAME,
-            ),
-            (
-                # Stop when there is a scaling
                 watch_until(
-                    condition=raise_on_pod_ready_after_hpa_scale,
+                    condition=raise_on_scaled_pods_ready,
                     timeout=args.max_stress_duration_seconds,
                     poll_interval=5,
                     k8s=k8s,
@@ -278,7 +198,6 @@ def _build_stress_tasks(
                 HPA_SCALE_POD_READY_MONITOR_TASK_NAME,
             ),
             (
-                # Fail fast in case of any errors
                 watch_until(
                     condition=raise_on_container_fail,
                     timeout=args.max_stress_duration_seconds,
@@ -297,51 +216,74 @@ def _build_stress_tasks(
 
 async def stress_cpu_hpa(**kwargs) -> Optional[Dict]:
     """
-    Apply controlled CPU stress to a subset of pods to trigger CPU-based HPA scale-up.
+    Apply CPU stress until HPA scale-up is observed and the scaled pods are Ready.
 
     Workflow:
-        1. Discover the workload and its HPA configuration.
-        2. Determine how many pods must be stressed and CPU load per pod.
-        3. Apply CPU stress concurrently while monitoring HPA scaling.
+        1. Parse action arguments and resolve workload context.
+        2. Select the workload pods to stress and required CPU load.
+        3. Start a passive watcher that records the HPA SuccessfulRescale event.
+        4. Run stress tasks and monitors concurrently.
+        5. Return the merged scale event and readiness observations on success.
 
     Args:
-        **kwargs: Parameters defined by `HpaCPUStressArgsTemplate`.
+        **kwargs: Parameters accepted by `PodStressSchema`.
+
+    Returns:
+        Result payload describing the detected HPA scale-up, or `{}` if no stress
+        is needed because the workload already meets the trigger condition.
 
     Raises:
-        CPUStressCommandFailed: If stress execution fails on any pod.
-        TimeoutError: If HPA does not scale in the expected duration.
+        CPUStressCommandFailed: If CPU stress execution fails.
+        HpaScalePodReadyError: Internally used as the success signal when scaled
+            pods become Ready.
+        Exception: Any monitor failure raised by `watch_task_group`.
     """
     logger.info("Starting CPU HPA stress test")
+
     args = PodStressSchema(**kwargs)
     k8s = KubernetesClient()
-
     workload: WorkloadState = get_context("workload")
+    scenario: ResiliencyScenario = get_context("scenario")
+    namespace = scenario.template.namespace
 
-    # Select pods and compute stress load
     pods_to_stress, stress_cpu_percent = await select_pods_to_stress(k8s=k8s)
     if not pods_to_stress:
-        logger.info("Workload already exceeds HPA CPU threshold; skipping stress")
         return {}
 
-    # Build stress + HPA monitoring tasks
-    stress_tasks = _build_stress_tasks(
-        k8s=k8s,
-        pods_to_stress=pods_to_stress,
-        stress_cpu_percent=stress_cpu_percent,
-        args=args,
+    # Capture start time ONCE
+    stress_start_time = datetime.now(timezone.utc)
+
+    # Start event watcher in background (passive)
+    event_task = asyncio.create_task(
+        wait_for_hpa_scale_up_event(
+            k8s=k8s,
+            namespace=namespace,
+            workload=workload,
+            not_before=stress_start_time,
+        )
     )
 
     try:
+        stress_tasks = build_hpa_stress_tasks(
+            k8s=k8s,
+            pods_to_stress=pods_to_stress,
+            stress_cpu_percent=stress_cpu_percent,
+            args=args,
+        )
+
         await watch_task_group(
             tasks=stress_tasks,
             timeout=args.max_stress_duration_seconds + HPA_SCALEUP_TASK_BUFFER_TIME,
             return_when=asyncio.FIRST_EXCEPTION,
             raise_exception=True,
         )
+
     except HpaScalePodReadyError as exc:
         logger.info("HPA scaleup success")
-        observed = exc.context.get("observed")
-        scale_event = get_context("hpa_scale_event", raise_error=False)
+        observed = exc.context.get("observed", {})
+        scale_event = get_context(
+            HPA_SCALE_UP_EVENT_CONTEXT_KEY, default={}, raise_error=False
+        )
         context = {**observed, **scale_event}
         set_context("stress_context", {"workload": workload, **context})
         return {
@@ -349,3 +291,6 @@ async def stress_cpu_hpa(**kwargs) -> Optional[Dict]:
             "reason": "CPU stress triggered HPA scale-up",
             "observed": context,
         }
+
+    finally:
+        event_task.cancel()

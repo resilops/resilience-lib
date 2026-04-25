@@ -10,19 +10,19 @@ from reslib.core.context import get_context
 from reslib.core.watchdog import watch_task_group, watch_until
 from reslib.k8s.client import KubernetesClient
 from reslib.k8s.exceptions import PodDeletionTimeoutError, PodsSelectionError
-from reslib.k8s.schema import WorkloadState
-from reslib.k8s.utils import (
+from reslib.k8s.pods import (
     get_pod_termination_timeout,
     get_workload_pods,
     pod_exists,
 )
+from reslib.k8s.schema import WorkloadState
 from reslib.schemas.scenario import ResiliencyScenario
 from reslib.schemas.validators import QuantitySelection
 
 logger = logging.getLogger(__name__)
 
 
-async def watch_pod_deletion(
+async def build_pod_deletion_task(
     k8s: KubernetesClient, pod: V1Pod, namespace: str, timeout: int
 ):
     """
@@ -184,15 +184,15 @@ async def terminate_pods(**kwargs) -> Dict:
     timeout: int = get_pod_termination_timeout(
         candidate_pods, max_timeout=args.timeout_seconds
     )
-    tasks = []
+    deletion_tasks = []
     for pod in candidate_pods:
-        tasks.append(
-            await watch_pod_deletion(
+        deletion_tasks.append(
+            await build_pod_deletion_task(
                 k8s=k8s, pod=pod, namespace=namespace, timeout=timeout
             )
         )
     await watch_task_group(
-        tasks=tasks, timeout=timeout + 5, return_when=asyncio.FIRST_EXCEPTION
+        tasks=deletion_tasks, timeout=timeout + 5, return_when=asyncio.FIRST_EXCEPTION
     )
     logger.info("Pod termination successful")
     return {
