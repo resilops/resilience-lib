@@ -7,6 +7,7 @@ from typing import Any, Awaitable, Dict, List, Optional, Tuple
 from kubernetes import stream
 from kubernetes.client import V1Pod
 
+from reslib import helpers as h
 from reslib.actions.schemas import PodStressSchema
 from reslib.constants import (
     CONTAINER_CRASH_MONITOR_TASK_NAME,
@@ -76,6 +77,7 @@ async def run_cpu_stress(
     ]
 
     stream_resp = None
+    set_context("stress_started_at", h.utc_now_iso())
     try:
         stream_api = k8s.new_v1_api()
         stream_resp = await asyncio.to_thread(
@@ -270,7 +272,6 @@ async def stress_cpu_hpa(**kwargs) -> Optional[Dict]:
             stress_cpu_percent=stress_cpu_percent,
             args=args,
         )
-
         await watch_task_group(
             tasks=stress_tasks,
             timeout=args.max_stress_duration_seconds + HPA_SCALEUP_TASK_BUFFER_TIME,
@@ -289,6 +290,8 @@ async def stress_cpu_hpa(**kwargs) -> Optional[Dict]:
         return {
             "result": "hpa_scale_up_detected",
             "reason": "CPU stress triggered HPA scale-up",
+            "stress_started_at": get_context("stress_started_at"),
+            "stress_stopped_at": h.utc_now_iso(),
             "observed": context,
         }
 

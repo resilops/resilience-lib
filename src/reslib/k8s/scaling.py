@@ -364,15 +364,17 @@ async def raise_on_replicas_restored(
 
     current_replicas = deployment.status.ready_replicas or 0
     desired_replicas = hpa.status.desired_replicas or 0
-    current_average_utilization = get_hpa_current_average_utilization(hpa)
-    logger.info(f"Current CPU utilization: {current_average_utilization}")
+    selector_labels = deployment.spec.selector.match_labels or {}
 
-    if (
-        desired_replicas < max_replicas_on_stress
-        and current_replicas < max_replicas_on_stress
-        and current_average_utilization
-        and current_average_utilization < stress_average_utilization
-    ):
+    if max_replicas_on_stress > desired_replicas == current_replicas:
+        current_average_utilization = get_hpa_current_average_utilization(hpa)
+        pods = await get_pods_by_labels(
+            k8s=k8s,
+            namespace=namespace,
+            labels=selector_labels,
+            pod_phase=None,
+        )
+        latest_pod_ready_time = get_latest_pod_ready_time(pods)
         raise ReplicasRestoredError(
             error_code="HPA_REPLICAS_RESTORED",
             message=(
@@ -396,6 +398,7 @@ async def raise_on_replicas_restored(
                     "current_desired_replicas": desired_replicas,
                     "stress_average_utilization": stress_average_utilization,
                     "current_average_utilization": current_average_utilization,
+                    "scale_down_completed_at": latest_pod_ready_time,
                 },
             },
             fix_hint=(

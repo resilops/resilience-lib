@@ -5,8 +5,9 @@ from typing import Dict, List
 
 from kubernetes.client import V1DeleteOptions, V1Pod
 
+from reslib import helpers as h
 from reslib.actions.schemas import PodTerminationSchema
-from reslib.core.context import get_context
+from reslib.core.context import get_context, set_context
 from reslib.core.watchdog import watch_task_group, watch_until
 from reslib.k8s.client import KubernetesClient
 from reslib.k8s.exceptions import PodDeletionTimeoutError, PodsSelectionError
@@ -49,6 +50,7 @@ async def build_pod_deletion_task(
     await k8s.delete_namespaced_pod(
         name=pod.metadata.name, namespace=namespace, body=V1DeleteOptions()
     )
+    set_context("last_pod_killed_at", h.utc_now_iso())
     return (
         watch_until(
             condition=pod_exists,
@@ -204,5 +206,6 @@ async def terminate_pods(**kwargs) -> Dict:
             "requested_terminations": pods_to_terminate,
             "terminated_pods": len(candidate_pods),
             "termination_timeout_seconds": timeout,
+            "last_pod_killed_at": get_context("last_pod_killed_at"),
         },
     }
