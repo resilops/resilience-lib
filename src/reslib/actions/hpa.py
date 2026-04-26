@@ -285,13 +285,16 @@ async def stress_cpu_hpa(**kwargs) -> Optional[Dict]:
         scale_event = get_context(
             HPA_SCALE_UP_EVENT_CONTEXT_KEY, default={}, raise_error=False
         )
-        context = {**observed, **scale_event}
+        context = {
+            **observed,
+            **scale_event,
+            "stress_started_at": get_context("stress_started_at"),
+            "stress_stopped_at": h.utc_now_iso(),
+        }
         set_context("stress_context", {"workload": workload, **context})
         return {
             "result": "hpa_scale_up_detected",
             "reason": "CPU stress triggered HPA scale-up",
-            "stress_started_at": get_context("stress_started_at"),
-            "stress_stopped_at": h.utc_now_iso(),
             "observed": context,
         }
 

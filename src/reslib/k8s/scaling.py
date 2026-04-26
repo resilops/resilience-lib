@@ -150,7 +150,8 @@ async def _watch_hpa_scale_event(
     watcher = k8s.new_watch()
     field_selector = (
         f"involvedObject.kind=HorizontalPodAutoscaler,"
-        f"involvedObject.name={hpa_name}"
+        f"involvedObject.name={hpa_name},"
+        f"reason=SuccessfulRescale"
     )
 
     def _watch() -> Optional[Dict]:
@@ -159,12 +160,8 @@ async def _watch_hpa_scale_event(
                 api.list_namespaced_event,
                 namespace=namespace,
                 field_selector=field_selector,
-                timeout_seconds=0,
             ):
                 obj = event["object"]
-                if getattr(obj, "reason", None) != "SuccessfulRescale":
-                    continue
-
                 scale_event_time = _extract_event_timestamp(obj)
                 if scale_event_time is None:
                     continue
@@ -189,6 +186,9 @@ async def _watch_hpa_scale_event(
                 return payload
 
             return None
+        except Exception:
+            logger.exception("Failed to watch HPA scale event")
+            raise
         finally:
             watcher.stop()
 
