@@ -102,7 +102,13 @@ async def _execute_phase(
                     phase=phase,
                     function=step.name,
                     error="TimeoutError",
-                    data={"timeout_seconds": PHASE_EXECUTION_MAX_TIMEOUT},
+                    data={
+                        "error_code": "PHASE_TIMEOUT",
+                        "message": (
+                            "Phase execution failed to finish "
+                            f"within: {PHASE_EXECUTION_MAX_TIMEOUT} seconds"
+                        ),
+                    },
                 )
             )
             raise
@@ -113,6 +119,7 @@ async def _execute_phase(
                     phase=phase,
                     error=exc.__class__.__name__,
                     function=step.name,
+                    data={"error_code": "UNKNOWN_ERROR", "message": str(exc)},
                 )
             )
             raise

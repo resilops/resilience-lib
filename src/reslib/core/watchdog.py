@@ -62,21 +62,16 @@ async def watch_task_group(
 
     if pending:
         scenario = get_context("scenario")
-        TaskGroupTimeoutError(
+        raise TaskGroupTimeoutError(
             error_code="TASK_GROUP_TIMEOUT",
-            message="Task group execution exceeded allowed timeout.",
-            namespace=scenario.template.namespace,
-            workload=scenario.template.workload,
-            context={
-                "rule": "all required tasks complete before timeout",
-                "observed": {
-                    "timeout_seconds": timeout,
-                    "completed_tasks": [t.get_name() for t in done],
-                    "pending_tasks": [t.get_name() for t in pending],
-                },
-            },
-            fix_hint="Increase timeout or investigate long-running or blocked tasks.",
-            retryable=False,
+            message=(
+                f"Timed out after {timeout} seconds while waiting for background "
+                f"tasks for workload '{scenario.template.workload}'."
+            ),
+            fix_hint=(
+                "Increase the timeout or inspect the tasks that are still running "
+                f"({', '.join(t.get_name() for t in pending)})."
+            ),
         )
 
     return list(done)
@@ -112,22 +107,15 @@ async def watch_until(
     scenario = get_context("scenario")
     timeout_exception = timeout_exception or TaskTimeoutError(
         error_code="WATCH_CONDITION_TIMEOUT",
-        message="Condition was not satisfied within the allowed timeout.",
-        namespace=scenario.template.namespace,
-        workload=scenario.template.workload,
-        context={
-            "rule": "condition evaluates to truthy before timeout",
-            "inputs": {
-                "condition": repr(condition),
-                "timeout_seconds": timeout,
-                "poll_interval_seconds": poll_interval,
-            },
-        },
-        fix_hint=(
-            "Increase timeout, reduce system load, or verify that the "
-            "observed system state can reach the expected condition."
+        message=(
+            f"Timed out after {timeout} seconds while waiting for "
+            f"'{getattr(condition, '__name__', repr(condition))}' to succeed for "
+            f"workload '{scenario.template.workload}'."
         ),
-        retryable=False,
+        fix_hint=(
+            "Increase the timeout, reduce system load, or verify that the system "
+            "can actually reach the expected state."
+        ),
     )
 
     while True:

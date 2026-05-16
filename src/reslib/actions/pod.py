@@ -61,25 +61,14 @@ async def build_pod_deletion_task(
             k8s=k8s,
             timeout_exception=PodDeletionTimeoutError(
                 error_code="POD_DELETION_TIMEOUT",
-                message="Pod was not deleted within the allowed timeout.",
-                namespace=namespace,
-                workload=get_context("scenario").template.workload,
-                context={
-                    "rule": "pod no longer exists before timeout",
-                    "inputs": {
-                        "pod_name": pod.metadata.name,
-                        "namespace": namespace,
-                        "timeout_seconds": timeout,
-                    },
-                    "observed": {
-                        "deletion_requested": True,
-                    },
-                },
-                fix_hint=(
-                    "Check pod finalizers, termination grace period, "
-                    "or node health preventing deletion."
+                message=(
+                    f"Pod '{pod.metadata.name}' was not deleted within "
+                    f"{timeout} seconds."
                 ),
-                retryable=True,
+                fix_hint=(
+                    "Check pod finalizers, termination grace period, or node "
+                    "health preventing deletion."
+                ),
             ),
         ),
         f"delete:pod:{pod.metadata.name}",
@@ -127,25 +116,13 @@ async def terminate_pods(**kwargs) -> Dict:
     if pods_to_terminate <= 0:
         raise PodsSelectionError(
             error_code="NO_PODS_SELECTED_FOR_TERMINATION",
-            message="Resolved pod termination count is zero; nothing to terminate.",
-            namespace=namespace,
-            workload=workload_name,
-            context={
-                "rule": "pods_to_terminate >= 1",
-                "inputs": {
-                    "mode": scenario.template.mode.value,
-                    "quantity": scenario.template.quantity,
-                    "ready_replicas": workload.runtime.ready_replicas,
-                },
-                "observed": {
-                    "pods_to_terminate": pods_to_terminate,
-                },
-            },
-            fix_hint=(
-                "Increase `quantity` (or percentage) or ensure "
-                "the workload has ready replicas."
+            message=(
+                "The requested pod selection resolved to 0 pods, so there is "
+                "nothing to terminate."
             ),
-            retryable=False,
+            fix_hint=(
+                "Increase the quantity or ensure the workload has ready replicas."
+            ),
         )
 
     # 3. List candidate pods
@@ -159,27 +136,15 @@ async def terminate_pods(**kwargs) -> Dict:
     if not candidate_pods:
         raise PodsSelectionError(
             error_code="NO_CANDIDATE_PODS_FOUND",
-            message="No eligible running pods were found for termination.",
-            namespace=namespace,
-            workload=workload_name,
-            context={
-                "rule": "at least one candidate pod must be available for termination",
-                "inputs": {
-                    "namespace": namespace,
-                    "workload": workload_name,
-                    "requested_terminations": pods_to_terminate,
-                },
-                "observed": {
-                    "total_pods_found": len(pods),
-                    "candidate_pods_selected": len(candidate_pods),
-                },
-            },
+            message=(
+                f"No eligible running pods were found for workload "
+                f"'{workload_name}' in namespace '{namespace}'."
+            ),
             fix_hint=(
                 "Ensure the workload has running pods and the label selector matches. "
                 "If the workload is scaling down or restarting, retry after "
                 "it stabilizes."
             ),
-            retryable=True,
         )
 
     # 4. Terminate pods concurrently

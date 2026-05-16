@@ -34,29 +34,14 @@ async def ensure_pdb_not_violated(**kwargs) -> None:
     if not args.allow_missing_pdb and not pdb_config_exists:
         raise PdbNotConfiguredError(
             error_code="PDB_NOT_CONFIGURED",
-            message="PodDisruptionBudget is not configured for the target workload.",
-            namespace=namespace,
-            workload=workload_name,
-            context={
-                "rule": "pdb must exist unless allow_missing_pdb is true",
-                "inputs": {
-                    "allow_missing_pdb": args.allow_missing_pdb,
-                },
-                "observed": {
-                    "namespace": namespace,
-                    "workload": workload_name,
-                    "pdb_present": False,
-                },
-                "required": {
-                    "pdb_present": True,
-                },
-            },
-            fix_hint=(
-                "Create a PodDisruptionBudget for this workload to enforce "
-                "minimum availability during voluntary disruptions, "
-                "or set `allow_missing_pdb=true` to explicitly bypass this guardrail."
+            message=(
+                f"Workload '{workload_name}' in namespace '{namespace}' does not "
+                "have a PodDisruptionBudget."
             ),
-            retryable=False,
+            fix_hint=(
+                "Create a PodDisruptionBudget for this workload or set "
+                "`allow_missing_pdb=true` to bypass this guardrail explicitly."
+            ),
         )
 
     if not pdb_config_exists:
@@ -75,30 +60,13 @@ async def ensure_pdb_not_violated(**kwargs) -> None:
         raise DisruptionExceedMinAvailabilityError(
             error_code="PDB_MIN_AVAILABLE_VIOLATION",
             message=(
-                "Planned disruption would violate PodDisruptionBudget "
-                "minimum availability."
+                f"Disrupting {disruption_budget} pod(s) would leave {remaining_pods} "
+                f"ready pod(s), below the PodDisruptionBudget minimum of "
+                f"{min_available}."
             ),
-            namespace=namespace,
-            workload=workload_name,
-            context={
-                "rule": "remaining_ready_replicas >= pdb.min_available",
-                "inputs": {
-                    "pod_termination_count": disruption_budget,
-                },
-                "observed": {
-                    "ready_replicas": ready_replicas,
-                    "remaining_ready_replicas": remaining_pods,
-                    "pdb_min_available": min_available,
-                },
-                "required": {
-                    "pdb_min_available": min_available,
-                    "max_terminations_allowed": max(0, ready_replicas - min_available),
-                },
-            },
             fix_hint=(
-                "Reduce `pod_termination_count` so remaining replicas "
-                "stay >= PDB minAvailable, "
-                "or adjust the PDB policy if this disruption is intended."
+                f"Reduce pod terminations to at most "
+                f"{max(0, ready_replicas - min_available)}, or adjust the "
+                "PodDisruptionBudget if that is intentional."
             ),
-            retryable=False,
         )

@@ -117,9 +117,24 @@ async def get_namespace_policies_snapshot(
     return snapshot
 
 
+def _resolve_service_port_for_probe(probe_port, service) -> Optional[int]:
+    """Resolve service port"""
+    if not service or not service.spec or not service.spec.ports:
+        return probe_port
+
+    for svc_port in service.spec.ports:
+        # Service targetPort points to the container/probe port
+        target_port = getattr(svc_port, "target_port", None)
+
+        if target_port == probe_port:
+            return svc_port.port
+
+    return probe_port
+
+
 def _build_probe_http_get(
     probe: Optional[V1Probe],
-    service_name: Optional[str],
+    service: Optional[V1Service],
     namespace: Optional[str],
 ) -> Optional[ProbeHttpGet]:
     """Build a normalized HTTP probe endpoint definition."""
@@ -128,12 +143,17 @@ def _build_probe_http_get(
 
     http_get = probe.http_get
     host = getattr(http_get, "host", None)
+    service_name = service.metadata.name if service is not None else None
+
     if not host and service_name and namespace:
         host = f"{service_name}.{namespace}.svc.cluster.local"
 
+    probe_port = getattr(http_get, "port", None)
+    service_port = _resolve_service_port_for_probe(probe_port, service)
+
     return ProbeHttpGet(
         path=getattr(http_get, "path", None) or "/",
-        port=getattr(http_get, "port", None),
+        port=service_port,
         host=host,
         scheme=(getattr(http_get, "scheme", None) or "HTTP").lower(),
     )
@@ -141,7 +161,7 @@ def _build_probe_http_get(
 
 def _build_container_specs(
     deployment: V1Deployment,
-    service_name: Optional[str],
+    service: Optional[V1Service],
     *,
     include_resources: bool,
 ) -> List[ContainerSpec]:
@@ -166,18 +186,18 @@ def _build_container_specs(
                 health=ContainerHealthSpec(
                     readiness=_build_probe_http_get(
                         getattr(container, "readiness_probe", None),
-                        service_name,
+                        service,
                         namespace,
                     ),
                     liveness=_build_probe_http_get(
                         getattr(container, "liveness_probe", None),
-                        service_name,
+                        service,
                         namespace,
                     ),
                     startup=(
                         _build_probe_http_get(
                             getattr(container, "startup_probe", None),
-                            service_name,
+                            service,
                             namespace,
                         )
                         if include_resources
@@ -210,24 +230,29 @@ def _build_hpa_config(
     )
 
 
-def get_service_name(
+def get_service(
     deployment: V1Deployment,
-    services: Optional[List[V1Service]] = None,
-) -> Optional[str]:
-    """Return the deterministic service name that targets the deployment pods."""
+    services: list[V1Service] | None = None,
+) -> V1Service | None:
+    """Return the deterministic service targeting deployment pods."""
     if not services:
         return None
 
     pod_labels = deployment.spec.template.metadata.labels or {}
-    matching_service_names = [
-        service.metadata.name
+
+    matching_services = [
+        service
         for service in services
         if service.spec.selector
         and all(
             pod_labels.get(key) == value for key, value in service.spec.selector.items()
         )
     ]
-    return min(matching_service_names) if matching_service_names else None
+
+    if not matching_services:
+        return None
+
+    return min(matching_services, key=lambda service: service.metadata.name)
 
 
 def get_workload_spec(
@@ -238,7 +263,8 @@ def get_workload_spec(
     is_full: bool = True,
 ) -> WorkloadSpec:
     """Build a normalized workload spec from a deployment."""
-    service_name = get_service_name(deployment, services)
+    service = get_service(deployment, services)
+    service_name = service.metadata.name if service is not None else None
     return WorkloadSpec(
         name=deployment.metadata.name,
         service_name=service_name,
@@ -248,7 +274,7 @@ def get_workload_spec(
         labels=deployment.spec.selector.match_labels if is_full else None,
         containers=_build_container_specs(
             deployment,
-            service_name,
+            service,
             include_resources=is_full,
         ),
     )
@@ -318,24 +344,13 @@ async def get_workload(
         if exc.status == 404:
             raise WorkloadNotFound(
                 error_code="WORKLOAD_NOT_FOUND",
-                message="Requested workload deployment was not found.",
-                namespace=namespace,
-                workload=name,
-                context={
-                    "rule": "deployment exists in namespace",
-                    "inputs": {
-                        "deployment": name,
-                        "namespace": namespace,
-                    },
-                    "observed": {
-                        "deployment_found": False,
-                    },
-                },
-                fix_hint=(
-                    "Verify the deployment name and namespace, or ensure the workload "
-                    "has been created before running this operation."
+                message=(
+                    f"Deployment '{name}' was not found in namespace " f"'{namespace}'."
                 ),
-                retryable=False,
+                fix_hint=(
+                    "Verify the deployment name and namespace, or create the "
+                    "workload before retrying."
+                ),
             )
         raise
 

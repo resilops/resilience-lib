@@ -28,6 +28,9 @@ logger = logging.getLogger(__name__)
 
 HPA_SCALE_UP_EVENT_CONTEXT_KEY = "hpa_scale_up_event"
 HPA_SCALE_DOWN_EVENT_CONTEXT_KEY = "hpa_scale_down_event"
+HPA_SCALED_PODS_READY_CONTEXT_KEY = "hpa_scaled_pods_ready"
+DESIRED_REPLICA_REACHED_CONTEXT_KEY = "desired_replica_reached"
+REPLICAS_RESTORED_CONTEXT_KEY = "replicas_restored"
 
 
 def get_hpa_resource_metric(
@@ -59,24 +62,14 @@ def calculate_hpa_trigger(
     if average_utilization is None:
         raise HpaNotConfiguredError(
             error_code="HPA_AVERAGE_UTILIZATION_MISSING",
-            message="HPA metric configuration is missing averageUtilization target.",
-            namespace=scenario.template.namespace,
-            workload=scenario.template.workload,
-            context={
-                "rule": "HPA metric.resource.target.averageUtilization must be defined",
-                "inputs": {
-                    "metric_type": getattr(metric, "type", "resource"),
-                },
-                "observed": {
-                    "average_utilization": None,
-                    "metric_target": metric.resource.get("target", {}),
-                },
-            },
+            message=(
+                f"The HPA metric for workload '{scenario.template.workload}' is "
+                "missing `target.averageUtilization`."
+            ),
             fix_hint=(
                 "Configure the HPA resource metric with "
                 "`target.averageUtilization` before running CPU stress tests."
             ),
-            retryable=False,
         )
 
     replicas = status.ready_replicas
@@ -264,29 +257,22 @@ async def raise_on_scaled_pods_ready(
             pod_phase=None,
         )
         latest_pod_ready_time = get_latest_pod_ready_time(pods)
+        set_context(
+            HPA_SCALED_PODS_READY_CONTEXT_KEY,
+            {
+                "before_replicas": start_replicas,
+                "desired_replicas": desired_replicas,
+                "ready_replicas": ready_replicas,
+                "latest_pod_ready_time": latest_pod_ready_time,
+                "average_utilization": get_hpa_current_average_utilization(hpa=hpa),
+            },
+        )
         raise HpaScalePodReadyError(
             error_code="HPA_SCALED_PODS_READY",
-            message="Scaled pods became Ready.",
-            namespace=namespace,
-            workload=workload.spec.name,
-            context={
-                "rule": (
-                    "ready_replicas >= deployment_replicas and "
-                    "deployment_replicas > initial_replicas"
-                ),
-                "inputs": {
-                    "workload_name": workload.spec.name,
-                    "namespace": namespace,
-                },
-                "observed": {
-                    "before_replicas": start_replicas,
-                    "desired_replicas": desired_replicas,
-                    "ready_replicas": ready_replicas,
-                    "latest_pod_ready_time": latest_pod_ready_time,
-                    "average_utilization": get_hpa_current_average_utilization(hpa=hpa),
-                },
-            },
-            retryable=False,
+            message=(
+                f"Workload '{workload.spec.name}' scaled from {start_replicas} to "
+                f"{ready_replicas} ready replica(s)."
+            ),
         )
 
     return None
@@ -296,6 +282,7 @@ async def raise_on_desired_replicas(
     k8s: KubernetesClient,
     workload_name: str,
     namespace: str,
+    after: str,
 ) -> None:
     """Raise when a deployment reaches or exceeds its desired replica count."""
     deployment = await k8s.read_namespaced_deployment(
@@ -314,33 +301,35 @@ async def raise_on_desired_replicas(
             pod_phase=None,
         )
         latest_pod_ready_time = get_latest_pod_ready_time(pods)
+
+        # Prevent false positives from stale deployment status
+        # or previously-ready pods.
+        if (
+            latest_pod_ready_time is None
+            or latest_pod_ready_time <= datetime.fromisoformat(after)
+        ):
+            return
+
+        set_context(
+            DESIRED_REPLICA_REACHED_CONTEXT_KEY,
+            {
+                "ready_replicas": ready_replicas,
+                "desired_replicas": desired_replicas,
+                "at_or_above_desired": True,
+                "latest_pod_ready_time": (
+                    latest_pod_ready_time.isoformat()
+                    if latest_pod_ready_time is not None
+                    else None
+                ),
+            },
+        )
         raise ReachedDesiredReplicaError(
             error_code="DESIRED_REPLICA_COUNT_REACHED",
-            message="Deployment has reached or exceeded the desired replica count.",
-            namespace=namespace,
-            workload=workload_name,
-            context={
-                "rule": "ready_replicas < desired_replicas",
-                "inputs": {
-                    "deployment": workload_name,
-                    "namespace": namespace,
-                },
-                "observed": {
-                    "ready_replicas": ready_replicas,
-                    "desired_replicas": desired_replicas,
-                    "at_or_above_desired": True,
-                    "latest_pod_ready_time": (
-                        latest_pod_ready_time.isoformat()
-                        if latest_pod_ready_time is not None
-                        else None
-                    ),
-                },
-            },
-            fix_hint=(
-                "Stop waiting for additional replicas. The deployment has already "
-                "reached the desired state."
+            message=(
+                f"Deployment '{workload_name}' now has {ready_replicas} ready "
+                f"replica(s), which meets the desired count of {desired_replicas}."
             ),
-            retryable=False,
+            fix_hint=("No action is required. The deployment has already recovered."),
         )
 
 
@@ -368,35 +357,22 @@ async def raise_on_replicas_restored(
 
     if max_replicas_on_stress > desired_replicas == current_replicas:
         current_average_utilization = get_hpa_current_average_utilization(hpa)
+        set_context(
+            REPLICAS_RESTORED_CONTEXT_KEY,
+            {
+                "peak_replicas_during_stress": max_replicas_on_stress,
+                "current_ready_replicas": current_replicas,
+                "current_desired_replicas": desired_replicas,
+                "stress_average_utilization": stress_average_utilization,
+                "current_average_utilization": current_average_utilization,
+                "scale_down_completed_at": h.utc_now_iso(),
+            },
+        )
         raise ReplicasRestoredError(
             error_code="HPA_REPLICAS_RESTORED",
             message=(
-                "Workload replicas have stabilized following CPU "
-                "stress-induced scaling."
+                f"Workload '{initial_workload_state.spec.name}' has returned to "
+                f"{current_replicas} ready replica(s) after HPA scale-up."
             ),
-            namespace=namespace,
-            workload=initial_workload_state.spec.name,
-            context={
-                "rule": (
-                    "desired_replicas and ready_replicas fall below "
-                    "stress peak replicas and CPU utilization decreases"
-                ),
-                "inputs": {
-                    "deployment": initial_workload_state.spec.name,
-                    "namespace": namespace,
-                },
-                "observed": {
-                    "peak_replicas_during_stress": max_replicas_on_stress,
-                    "current_ready_replicas": current_replicas,
-                    "current_desired_replicas": desired_replicas,
-                    "stress_average_utilization": stress_average_utilization,
-                    "current_average_utilization": current_average_utilization,
-                    "scale_down_completed_at": h.utc_now_iso(),
-                },
-            },
-            fix_hint=(
-                "HPA scale-down stabilization detected. "
-                "CPU stress recovery phase is complete."
-            ),
-            retryable=False,
+            fix_hint="No action is required. The HPA recovery phase has completed.",
         )

@@ -30,59 +30,31 @@ async def validate_metric_and_resource() -> None:
             If the metric source or resource type is not in the supported sets.
     """
     scenario: ResiliencyScenario = get_context("scenario")
-    namespace = scenario.template.namespace
-    workload_name = scenario.template.workload
 
     if scenario.template.metric_source not in SUPPORTED_HPA_METRIC_SOURCES:
         raise NotSupportedError(
             error_code="HPA_METRIC_SOURCE_NOT_SUPPORTED",
-            message="Requested HPA metric source is not supported for scaling tests.",
-            namespace=namespace,
-            workload=workload_name,
-            context={
-                "rule": "metric_source in SUPPORTED_HPA_METRIC_SOURCES",
-                "inputs": {
-                    "metric_source": scenario.template.metric_source.value,
-                    "resource_type": scenario.template.resource_type.value,
-                },
-                "observed": {
-                    "metric_source": scenario.template.metric_source.value,
-                    "supported_metric_sources": [
-                        m.value for m in SUPPORTED_HPA_METRIC_SOURCES
-                    ],
-                },
-            },
-            fix_hint=(
-                "Choose a supported `metric_source` from `supported_metric_sources`, "
-                "or implement support for this metric source."
+            message=(
+                f"Metric source '{scenario.template.metric_source.value}' is not "
+                "supported for this HPA scaling scenario."
             ),
-            retryable=False,
+            fix_hint=(
+                "Use one of the supported metric sources: "
+                f"{', '.join(m.value for m in SUPPORTED_HPA_METRIC_SOURCES)}."
+            ),
         )
 
     if scenario.template.resource_type not in SUPPORTED_HPA_RESOURCE_TYPES:
         raise NotSupportedError(
             error_code="HPA_RESOURCE_TYPE_NOT_SUPPORTED",
-            message="Requested HPA resource type is not supported for scaling tests.",
-            namespace=namespace,
-            workload=workload_name,
-            context={
-                "rule": "resource_type in SUPPORTED_HPA_RESOURCE_TYPES",
-                "inputs": {
-                    "metric_source": scenario.template.metric_source.value,
-                    "resource_type": scenario.template.resource_type.value,
-                },
-                "observed": {
-                    "resource_type": scenario.template.resource_type.value,
-                    "supported_resource_types": [
-                        r.value for r in SUPPORTED_HPA_RESOURCE_TYPES
-                    ],
-                },
-            },
-            fix_hint=(
-                "Choose a supported `resource_type` from `supported_resource_types`, "
-                "or implement support for this resource type."
+            message=(
+                f"Resource type '{scenario.template.resource_type.value}' is not "
+                "supported for this HPA scaling scenario."
             ),
-            retryable=False,
+            fix_hint=(
+                "Use one of the supported resource types: "
+                f"{', '.join(r.value for r in SUPPORTED_HPA_RESOURCE_TYPES)}."
+            ),
         )
 
 
@@ -100,7 +72,6 @@ async def validate_hpa_resource_metric() -> None:
     """
     workload: WorkloadState = get_context("workload")
     scenario: ResiliencyScenario = get_context("scenario")
-    namespace = scenario.template.namespace
     workload_name = scenario.template.workload
 
     hpa_metric: Optional[HPAMetricSpec] = get_hpa_resource_metric(
@@ -112,24 +83,15 @@ async def validate_hpa_resource_metric() -> None:
     if hpa_metric is None:
         raise HpaMetricsNotFoundError(
             error_code="HPA_METRIC_NOT_FOUND",
-            message="Requested HPA metric was not found in the HPA specification.",
-            namespace=namespace,
-            workload=workload_name,
-            context={
-                "rule": "HPA defines a metric matching (metric_source, resource_type)",
-                "inputs": {
-                    "metric_source": scenario.template.metric_source.value,
-                    "resource_type": scenario.template.resource_type.value,
-                },
-                "observed": {
-                    "match_found": False,
-                },
-            },
+            message=(
+                f"The HPA for workload '{workload_name}' does not define a "
+                f"{scenario.template.metric_source.value}/"
+                f"{scenario.template.resource_type.value} metric."
+            ),
             fix_hint=(
                 "Update the HPA to include the requested resource metric, "
-                "or change `metric_source` / `resource_type` to one that exists."
+                "or choose a metric that already exists on the workload."
             ),
-            retryable=False,
         )
 
     return None
@@ -149,19 +111,13 @@ async def ensure_hpa_exists() -> None:
     if not workload.spec.hpa:
         raise HpaNotConfiguredError(
             error_code="HPA_NOT_CONFIGURED",
-            message="Workload does not have an HPA configuration.",
-            namespace=namespace,
-            workload=workload_name,
-            context={
-                "rule": "workload.spec.hpa is None",
-                "inputs": {},
-                "observed": {"hpa_present": False},
-            },
-            fix_hint=(
-                "Enable/configure an HPA for this workload before "
-                "validating HPA metrics."
+            message=(
+                f"Workload '{workload_name}' in namespace '{namespace}' does not "
+                "have an HPA configured."
             ),
-            retryable=False,
+            fix_hint=(
+                "Configure an HPA for this workload before running HPA-based tests."
+            ),
         )
     return None
 
@@ -180,7 +136,6 @@ async def ensure_hpa_not_at_max_replicas() -> None:
     """
     workload: WorkloadState = get_context("workload")
     scenario: ResiliencyScenario = get_context("scenario")
-    namespace = scenario.template.namespace
     workload_name = scenario.template.workload
     if not workload.spec.hpa:
         return None
@@ -190,27 +145,11 @@ async def ensure_hpa_not_at_max_replicas() -> None:
     if ready >= max_replicas:
         raise WorkloadAtMaxError(
             error_code="WORKLOAD_AT_HPA_MAX_REPLICAS",
-            message="Workload is already at or above the HPA maximum replicas.",
-            namespace=namespace,
-            workload=workload_name,
-            context={
-                "rule": "ready_replicas < hpa.max_replicas",
-                "inputs": {
-                    "hpa_max_replicas": max_replicas,
-                },
-                "observed": {
-                    "ready_replicas": ready,
-                    "at_or_above_max": True,
-                },
-                "required": {
-                    "hpa_max_replicas": max_replicas,
-                },
-            },
-            fix_hint=(
-                "Reduce load or increase `hpa.maxReplicas` before "
-                "running this operation, because the workload cannot scale up further."
+            message=(
+                f"Workload '{workload_name}' is already at {ready} ready replica(s), "
+                f"which meets or exceeds the HPA maximum of {max_replicas}."
             ),
-            retryable=True,
+            fix_hint="Reduce load or increase `hpa.maxReplicas` before retrying.",
         )
     return None
 
@@ -232,8 +171,6 @@ async def validate_pods_to_stress_cpu() -> None:
 
     workload: WorkloadState = get_context("workload")
     scenario: ResiliencyScenario = get_context("scenario")
-    namespace = scenario.template.namespace
-    workload_name = scenario.template.workload
 
     hpa_metric = get_hpa_resource_metric(
         hpa=workload.spec.hpa,
@@ -256,35 +193,15 @@ async def validate_pods_to_stress_cpu() -> None:
     if pods_to_stress > max_pods_can_stress:
         raise PodsToStressExceededError(
             error_code="PODS_TO_STRESS_EXCEEDS_IDLE_SAFETY_LIMIT",
-            message="Calculated number of pods to stress exceeds allowed safety limit.",
-            namespace=namespace,
-            workload=workload_name,
-            context={
-                "rule": "pods_to_stress <= " "ready_replicas - required_idle_pods",
-                "inputs": {
-                    "idle_cpu_pct": scenario.template.idle_cpu_pct,
-                    "cpu_stress_threshold_pct": (
-                        scenario.template.cpu_stress_threshold_pct
-                    ),
-                    "min_idle_pct": scenario.template.min_idle_pct,
-                    "metric_source": scenario.template.metric_source.value,
-                    "resource_type": scenario.template.resource_type.value,
-                },
-                "observed": {
-                    "ready_replicas": workload.runtime.ready_replicas,
-                    "pods_to_stress": pods_to_stress,
-                    "required_idle_pods": min_idle_pods_count,
-                },
-                "required": {
-                    "max_allowed_pods_to_stress": max_pods_can_stress,
-                },
-            },
-            fix_hint=(
-                "Increase `min_idle_pct`, reduce "
-                "`cpu_stress_threshold_pct`, or scale the workload "
-                "to allow more pods to remain idle."
+            message=(
+                f"The scenario needs to stress {pods_to_stress} pod(s), but only "
+                f"{max_pods_can_stress} can be stressed while keeping "
+                f"{min_idle_pods_count} idle pod(s)."
             ),
-            retryable=True,
+            fix_hint=(
+                "Lower the stress target, lower `min_idle_pct`, or scale the "
+                "workload up before retrying."
+            ),
         )
 
     return None

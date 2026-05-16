@@ -36,69 +36,40 @@ async def ensure_workload_steady() -> None:
         raise WorkloadStatusUnavailableError(
             error_code="WORKLOAD_STATUS_UNAVAILABLE",
             message=(
-                "Workload runtime state is missing; cannot determine readiness for "
-                "disruption."
+                f"Workload '{workload_name}' in namespace '{namespace}' does not "
+                "have runtime status yet, so readiness cannot be checked."
             ),
-            namespace=namespace,
-            workload=workload_name,
-            context={
-                "rule": "workload.runtime is not None",
-                "inputs": {"workload_name": workload.spec.name},
-                "observed": {"runtime_present": False},
-            },
-            fix_hint=(
-                "Ensure the workload controller reports runtime state and retry "
-                "once runtime state is available."
-            ),
-            retryable=True,
+            fix_hint=("Wait for the workload status to appear, then retry."),
         )
 
     if runtime.status == WorkloadStatusEnum.reconciling:
         raise WorkloadReconcilingError(
             error_code="WORKLOAD_RECONCILING",
-            message="Workload is currently reconciling; disruption is blocked.",
-            namespace=namespace,
-            workload=workload_name,
-            context={
-                "rule": "workload.runtime.reconciling is False",
-                "inputs": {"workload_name": workload.spec.name},
-                "observed": {"reconciling": True},
-            },
-            fix_hint="Wait for reconciliation to complete, then retry the disruption.",
-            retryable=True,
+            message=(
+                f"Workload '{workload_name}' in namespace '{namespace}' is still "
+                "reconciling, so disruption is blocked for now."
+            ),
+            fix_hint="Wait for reconciliation to finish, then retry.",
         )
 
     if runtime.status == WorkloadStatusEnum.unavailable:
         raise WorkloadNotAvailableError(
             error_code="WORKLOAD_NOT_AVAILABLE",
-            message="Workload is not available/stable; disruption is blocked.",
-            namespace=namespace,
-            workload=workload_name,
-            context={
-                "rule": "workload.runtime.is_available is True",
-                "inputs": {"workload_name": workload.spec.name},
-                "observed": {"is_available": False},
-            },
-            fix_hint=(
-                "Restore workload availability (investigate readiness/health checks) "
-                "before running disruption."
+            message=(
+                f"Workload '{workload_name}' in namespace '{namespace}' is not "
+                "currently available, so disruption is blocked."
             ),
-            retryable=True,
+            fix_hint=(
+                "Restore workload availability and health checks before retrying."
+            ),
         )
 
     if runtime.status == WorkloadStatusEnum.degraded:
         raise WorkloadFaultyError(
             error_code="WORKLOAD_FAULTY",
-            message="Workload is in a faulty state; disruption is blocked.",
-            namespace=namespace,
-            workload=workload_name,
-            context={
-                "rule": "workload.runtime.is_faulty is False",
-                "inputs": {"workload_name": workload.spec.name},
-                "observed": {"is_faulty": True},
-            },
-            fix_hint=(
-                "Resolve the underlying fault condition before running disruption."
+            message=(
+                f"Workload '{workload_name}' in namespace '{namespace}' is in a "
+                "degraded state, so disruption is blocked."
             ),
-            retryable=False,
+            fix_hint="Resolve the workload failure before retrying.",
         )

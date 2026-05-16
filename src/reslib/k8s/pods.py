@@ -118,29 +118,14 @@ async def raise_on_container_fail(
             if state.waiting and state.waiting.reason not in POD_WAITING_REASONS_OK:
                 raise ContainerCrashedError(
                     error_code="CONTAINER_WAITING_UNEXPECTED",
-                    message="Container entered an unexpected waiting state.",
-                    namespace=namespace,
-                    workload=workload_spec.name,
-                    context={
-                        "rule": (
-                            "container waiting reason must be in allowed waiting states"
-                        ),
-                        "inputs": {
-                            "namespace": namespace,
-                            "workload": workload_spec.name,
-                        },
-                        "observed": {
-                            "pod": pod_name,
-                            "container": container_name,
-                            "waiting_reason": state.waiting.reason,
-                        },
-                    },
-                    fix_hint=(
-                        "Inspect pod events and container logs to determine why the "
-                        "container is blocked (e.g., ImagePullBackOff, "
-                        "CrashLoopBackOff)."
+                    message=(
+                        f"Container '{container_name}' in pod '{pod_name}' is stuck "
+                        f"in waiting state '{state.waiting.reason}'."
                     ),
-                    retryable=False,
+                    fix_hint=(
+                        "Inspect pod events and container logs, then resolve the "
+                        "waiting condition before retrying."
+                    ),
                 )
 
             if (
@@ -149,28 +134,13 @@ async def raise_on_container_fail(
             ):
                 raise ContainerCrashedError(
                     error_code="CONTAINER_TERMINATED_UNEXPECTED",
-                    message="Container terminated with an unexpected exit condition.",
-                    namespace=namespace,
-                    workload=workload_spec.name,
-                    context={
-                        "rule": (
-                            "container termination reason must be "
-                            "allowed and exit_code == 0"
-                        ),
-                        "inputs": {
-                            "namespace": namespace,
-                            "workload": workload_spec.name,
-                        },
-                        "observed": {
-                            "pod": pod_name,
-                            "container": container_name,
-                            "termination_reason": state.terminated.reason,
-                            "exit_code": state.terminated.exit_code,
-                        },
-                    },
-                    fix_hint=(
-                        "Check container logs and recent deployment changes. "
-                        "Restart or roll back the workload if crashes persist."
+                    message=(
+                        f"Container '{container_name}' in pod '{pod_name}' "
+                        f"terminated with reason '{state.terminated.reason}' and "
+                        f"exit code {state.terminated.exit_code}."
                     ),
-                    retryable=False,
+                    fix_hint=(
+                        "Check container logs and recent deployment changes, then "
+                        "restart or roll back the workload if the crash persists."
+                    ),
                 )

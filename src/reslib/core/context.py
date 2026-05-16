@@ -145,7 +145,11 @@ class ObserverContext:
                         event_name=EventEnum.OBSERVER_FAILED,
                         phase=ExecutionPhase.OBSERVER,
                         function=self.scenario.observer.name,
-                        data=exc.to_dict() if isinstance(exc, BaseError) else str(exc),
+                        data=(
+                            exc.to_dict()
+                            if isinstance(exc, BaseError)
+                            else {"": "UNKNOWN_ERROR", "message": str(exc)}
+                        ),
                         error=exc.__class__.__name__,
                     )
                 )

@@ -62,10 +62,6 @@ async def run_cpu_stress(
     Raises:
         CPUStressCommandFailed: If the stress command writes to stderr.
     """
-    scenario: ResiliencyScenario = get_context("scenario")
-    namespace = scenario.template.namespace
-    workload_name = scenario.template.workload
-
     command = [
         "stress-ng",
         "--cpu",
@@ -102,11 +98,12 @@ async def run_cpu_stress(
         if stderr:
             raise CPUStressCommandFailed(
                 error_code="CPU_STRESS_COMMAND_ERROR",
-                message="CPU stress command returned an error output.",
-                namespace=namespace,
-                workload=workload_name,
-                context={"observed": {"stderr": stderr}},
-                retryable=False,
+                message=(
+                    f"CPU stress failed in pod '{pod.metadata.name}'"
+                    + (f" (container '{container_name}')" if container_name else "")
+                    + "."
+                ),
+                fix_hint=f"Inspect the command output and container logs: {stderr}",
             )
 
         return stdout, stderr
@@ -279,9 +276,9 @@ async def stress_cpu_hpa(**kwargs) -> Optional[Dict]:
             raise_exception=True,
         )
 
-    except HpaScalePodReadyError as exc:
+    except HpaScalePodReadyError:
         logger.info("HPA scaleup success")
-        observed = exc.context.get("observed", {})
+        observed = get_context("hpa_scaled_pods_ready", default={}, raise_error=False)
         scale_event = get_context(
             HPA_SCALE_UP_EVENT_CONTEXT_KEY, default={}, raise_error=False
         )

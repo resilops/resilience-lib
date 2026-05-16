@@ -11,7 +11,10 @@ from reslib.core.watchdog import watch_task_group, watch_until
 from reslib.k8s.client import KubernetesClient
 from reslib.k8s.exceptions import ReachedDesiredReplicaError
 from reslib.k8s.pods import raise_on_container_fail
-from reslib.k8s.scaling import raise_on_desired_replicas
+from reslib.k8s.scaling import (
+    DESIRED_REPLICA_REACHED_CONTEXT_KEY,
+    raise_on_desired_replicas,
+)
 from reslib.k8s.schema import WorkloadState
 from reslib.rollbacks.schemas import PodRespawnTimeout
 from reslib.schemas.scenario import ResiliencyScenario
@@ -55,6 +58,7 @@ async def wait_until_pod_respawn(**kwargs):
                 k8s=k8s,
                 workload_name=workload.spec.name,
                 namespace=namespace,
+                after=get_context("last_pod_killed_at"),
             ),
             REACHED_DESIRED_REPLICA_TASK_NAME,
         ),
@@ -78,7 +82,7 @@ async def wait_until_pod_respawn(**kwargs):
             timeout=args.timeout_seconds + 30,
             return_when=asyncio.FIRST_EXCEPTION,
         )
-    except ReachedDesiredReplicaError as exc:
+    except ReachedDesiredReplicaError:
         # Expected exit path when scaling completes successfully
         logger.info("Pods reached desire state. Stopping pod watch")
         return {
@@ -88,5 +92,9 @@ async def wait_until_pod_respawn(**kwargs):
                 "Deployment reached the desired number of ready "
                 "replicas after pod termination."
             ),
-            "observed": exc.context.get("observed", {}),
+            "observed": get_context(
+                DESIRED_REPLICA_REACHED_CONTEXT_KEY,
+                default={},
+                raise_error=False,
+            ),
         }

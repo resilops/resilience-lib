@@ -14,6 +14,7 @@ from reslib.k8s.exceptions import ReplicasRestoredError
 from reslib.k8s.pods import raise_on_container_fail
 from reslib.k8s.scaling import (
     HPA_SCALE_DOWN_EVENT_CONTEXT_KEY,
+    REPLICAS_RESTORED_CONTEXT_KEY,
     raise_on_replicas_restored,
     wait_for_hpa_scale_down_event,
 )
@@ -107,9 +108,13 @@ async def wait_for_hpa_scale_down(**kwargs):
             timeout=args.timeout_seconds + 10,
             return_when=asyncio.FIRST_EXCEPTION,
         )
-    except ReplicasRestoredError as exc:
+    except ReplicasRestoredError:
         logger.info("Replicas restored. Rollback success")
-        observed = exc.context.get("observed", {})
+        observed = get_context(
+            REPLICAS_RESTORED_CONTEXT_KEY,
+            default={},
+            raise_error=False,
+        )
         scale_down_event = (
             get_context(
                 HPA_SCALE_DOWN_EVENT_CONTEXT_KEY,

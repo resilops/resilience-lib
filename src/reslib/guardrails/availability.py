@@ -28,7 +28,6 @@ async def validate_min_remaining_replicas() -> None:
     """
     workload: WorkloadState = get_context("workload")
     scenario: ResiliencyScenario = get_context("scenario")
-    namespace = scenario.template.namespace
     workload_name = scenario.template.workload
 
     total = workload.runtime.ready_replicas
@@ -42,26 +41,14 @@ async def validate_min_remaining_replicas() -> None:
     if remaining <= 0:
         raise DisruptionExceedMinAvailabilityError(
             error_code="DISRUPTION_TERMINATES_ALL_REPLICAS",
-            message="Requested disruption would terminate all running pods.",
-            namespace=namespace,
-            workload=workload_name,
-            context={
-                "rule": "remaining_replicas >= 1",
-                "inputs": {
-                    "mode": str(scenario.template.mode),
-                    "quantity": scenario.template.quantity,
-                },
-                "observed": {
-                    "total_ready_replicas": total,
-                    "pods_to_terminate": pods_to_terminate,
-                    "remaining_replicas": remaining,
-                },
-            },
-            fix_hint=(
-                "Reduce termination quantity or percentage so that "
-                "at least one replica remains available."
+            message=(
+                f"Terminating {pods_to_terminate} pod(s) would leave workload "
+                f"'{workload_name}' with no ready replicas."
             ),
-            retryable=False,
+            fix_hint=(
+                "Reduce the termination count or percentage so at least one "
+                "replica stays available."
+            ),
         )
 
     if remaining < scenario.template.min_remaining_replicas:
@@ -69,37 +56,14 @@ async def validate_min_remaining_replicas() -> None:
         raise DisruptionExceedMinAvailabilityError(
             error_code="DISRUPTION_BELOW_MIN_REMAINING_REPLICAS",
             message=(
-                "Requested disruption violates minimum remaining replicas constraint."
+                f"Terminating {pods_to_terminate} pod(s) would leave {remaining} "
+                f"ready replica(s), below the required minimum of "
+                f"{scenario.template.min_remaining_replicas}."
             ),
-            namespace=namespace,
-            workload=workload_name,
-            context={
-                "rule": (
-                    "remaining_replicas >= "
-                    "min_remaining_replicas "
-                    f"({scenario.template.min_remaining_replicas})"
-                ),
-                "inputs": {
-                    "mode": str(scenario.template.mode),
-                    "quantity": scenario.template.quantity,
-                    "min_remaining_replicas": scenario.template.min_remaining_replicas,
-                },
-                "observed": {
-                    "total_ready_replicas": total,
-                    "pods_to_terminate": pods_to_terminate,
-                    "remaining_replicas": remaining,
-                },
-                "required": {
-                    "min_remaining_replicas": scenario.template.min_remaining_replicas,
-                    "max_terminations_allowed": max_allowed,
-                },
-            },
             fix_hint=(
-                f"Reduce termination quantity so that "
-                f"`quantity <= {max_allowed}` "
-                "or increase workload replica count."
+                f"Reduce the termination count to {max_allowed} or fewer, or "
+                "increase the workload replica count."
             ),
-            retryable=False,
         )
 
     set_context("pod_termination_count", pods_to_terminate)
