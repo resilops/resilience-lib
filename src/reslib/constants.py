@@ -97,7 +97,7 @@ class MetricsEnum(str, Enum):
 AsyncFunc = Callable[..., Awaitable[None]]
 
 
-POD_KILL_SCENARIO_TEMPLATE: str = "pod_kill"
+POD_RECOVERY_SCENARIO_TEMPLATE: str = "pod_recovery"
 HPA_CPU_STRESS_SCENARIO_TEMPLATE: str = "hpa_cpu_stress"
 
 

@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 
 from reslib.constants import (
     HPA_CPU_STRESS_SCENARIO_TEMPLATE,
-    POD_KILL_SCENARIO_TEMPLATE,
+    POD_RECOVERY_SCENARIO_TEMPLATE,
     HpaMetricSourceEnum,
     HpaResourceTypeEnum,
     QuantitySelectionModeEnum,
@@ -34,7 +34,7 @@ class BaseScenarioTemplate(BaseModel):
     )
 
 
-class PodKillTemplate(BaseScenarioTemplate):
+class PodRecoveryTemplate(BaseScenarioTemplate):
     """
     Template for a single-workload pod termination scenario.
 
@@ -141,6 +141,6 @@ class HpaCpuStressTemplate(BaseScenarioTemplate):
 
 
 SCENARIO_TEMPLATES_MAPPING = {
-    POD_KILL_SCENARIO_TEMPLATE: PodKillTemplate,
+    POD_RECOVERY_SCENARIO_TEMPLATE: PodRecoveryTemplate,
     HPA_CPU_STRESS_SCENARIO_TEMPLATE: HpaCpuStressTemplate,
 }

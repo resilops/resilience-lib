@@ -6,7 +6,7 @@ from reslib.runtime.phases import ExecutionPhase
 from reslib.schemas.templates import (
     SCENARIO_TEMPLATES_MAPPING,
     HpaCpuStressTemplate,
-    PodKillTemplate,
+    PodRecoveryTemplate,
 )
 
 
@@ -89,7 +89,7 @@ class ResiliencyScenario(BaseModel):
     name: str = Field(..., description="Name of the scenario template.")
     title: str = Field(..., description="Title of the scenario template.")
     description: str = Field(..., description="Description of the scenario template.")
-    template: PodKillTemplate | HpaCpuStressTemplate = Field(
+    template: PodRecoveryTemplate | HpaCpuStressTemplate = Field(
         ...,
         description="Scenario-specific template fields.",
     )
@@ -108,7 +108,7 @@ class ResiliencyScenario(BaseModel):
 
         This validator executes before standard model validation. It inspects
         the `name` field to determine which concrete template model should be
-        used (e.g. PodKillTemplate, HpaCpuStressTemplate).
+        used (e.g. PodRecoveryTemplate, HpaCpuStressTemplate).
 
         The raw `template` dictionary is then validated against the selected
         template model and replaced with a strongly-typed instance.
