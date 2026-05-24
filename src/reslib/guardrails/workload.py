@@ -1,6 +1,7 @@
-from reslib.constants import WorkloadStatusEnum
+from reslib.constants import MIN_ROLLING_RESTART_REPLICAS, WorkloadStatusEnum
 from reslib.core.context import get_context
 from reslib.k8s.exceptions import (
+    InsufficientReplicasError,
     WorkloadFaultyError,
     WorkloadNotAvailableError,
     WorkloadReconcilingError,
@@ -39,7 +40,7 @@ async def ensure_workload_steady() -> None:
                 f"Workload '{workload_name}' in namespace '{namespace}' does not "
                 "have runtime status yet, so readiness cannot be checked."
             ),
-            fix_hint=("Wait for the workload status to appear, then retry."),
+            fix_hint="Wait for the workload status to appear, then retry.",
         )
 
     if runtime.status == WorkloadStatusEnum.reconciling:
@@ -72,4 +73,37 @@ async def ensure_workload_steady() -> None:
                 "degraded state, so disruption is blocked."
             ),
             fix_hint="Resolve the workload failure before retrying.",
+        )
+
+
+async def ensure_minimum_replicas_for_restart() -> None:
+    """
+    Validate that a workload has enough replicas for a rolling restart.
+
+    A rolling restart needs at least two desired and ready replicas to preserve
+    availability while Kubernetes replaces pods.
+    """
+    workload: WorkloadState = get_context("workload")
+    scenario: ResiliencyScenario = get_context("scenario")
+    namespace = scenario.template.namespace
+    workload_name = workload.spec.name
+    desired_replicas = workload.spec.replicas
+    ready_replicas = workload.runtime.ready_replicas if workload.runtime else 0
+
+    if (
+        desired_replicas < MIN_ROLLING_RESTART_REPLICAS
+        or ready_replicas < MIN_ROLLING_RESTART_REPLICAS
+    ):
+        raise InsufficientReplicasError(
+            error_code="INSUFFICIENT_REPLICAS_FOR_ROLLING_RESTART",
+            message=(
+                f"Workload '{workload_name}' in namespace '{namespace}' needs at "
+                f"least {MIN_ROLLING_RESTART_REPLICAS} desired and ready replicas "
+                f"for a rolling restart, but has {desired_replicas} desired and "
+                f"{ready_replicas} ready replica(s)."
+            ),
+            fix_hint=(
+                "Scale the workload to at least 2 replicas and wait for both "
+                "replicas to become ready before retrying."
+            ),
         )

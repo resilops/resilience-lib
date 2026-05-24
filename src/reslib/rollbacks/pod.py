@@ -46,6 +46,15 @@ async def wait_until_pod_respawn(**kwargs):
     workload: WorkloadState = get_context("workload")
     scenario: ResiliencyScenario = get_context("scenario")
     namespace: str = scenario.template.namespace
+    pod_disruption_at = get_context(
+        "last_pod_killed_at",
+        default=get_context(
+            "last_pod_evicted_at",
+            default=None,
+            raise_error=False,
+        ),
+        raise_error=False,
+    )
     k8s = KubernetesClient()
 
     tasks: List[Tuple[Awaitable[Any], str]] = [
@@ -58,7 +67,7 @@ async def wait_until_pod_respawn(**kwargs):
                 k8s=k8s,
                 workload_name=workload.spec.name,
                 namespace=namespace,
-                after=get_context("last_pod_killed_at"),
+                after=pod_disruption_at,
             ),
             REACHED_DESIRED_REPLICA_TASK_NAME,
         ),

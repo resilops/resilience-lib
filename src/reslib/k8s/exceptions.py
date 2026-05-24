@@ -21,6 +21,10 @@ class WorkloadNotAvailableError(BaseError):
     pass
 
 
+class InsufficientReplicasError(BaseError):
+    pass
+
+
 class DisruptionExceedMinAvailabilityError(BaseError):
     pass
 
@@ -86,4 +90,12 @@ class ReachedDesiredReplicaError(BaseError):
 
 
 class ReplicasRestoredError(BaseError):
+    pass
+
+
+class RollingRestartCompleteError(BaseError):
+    pass
+
+
+class RollingRestartTimeoutError(BaseError):
     pass

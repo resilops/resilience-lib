@@ -6,6 +6,7 @@ from reslib.constants import (
     HPA_CPU_STRESS_SCENARIO_TEMPLATE,
     POD_EVICTION_SCENARIO_TEMPLATE,
     POD_RECOVERY_SCENARIO_TEMPLATE,
+    ROLLING_RESTART_SCENARIO_TEMPLATE,
     HpaMetricSourceEnum,
     HpaResourceTypeEnum,
     QuantitySelectionModeEnum,
@@ -72,6 +73,27 @@ class PodRecoveryTemplate(BaseScenarioTemplate):
             "after pod termination to ensure service continuity."
         ),
     )
+
+
+class PodEvictionTemplate(PodRecoveryTemplate):
+    """
+    Template for a voluntary pod eviction scenario.
+
+    This scenario uses the Kubernetes eviction API to remove one or more pods
+    while respecting disruption policy. It shares the same pod selection and
+    minimum remaining replica controls as pod recovery, but remains a distinct
+    template type for schema clarity.
+    """
+
+
+class RollingRestartTemplate(BaseScenarioTemplate):
+    """
+    Template for a rolling restart scenario.
+
+    Rolling restart only needs the target namespace and workload. The concrete
+    type keeps scenario-template mapping explicit without reusing the base class
+    as a runnable scenario template.
+    """
 
 
 class HpaCpuStressTemplate(BaseScenarioTemplate):
@@ -143,6 +165,7 @@ class HpaCpuStressTemplate(BaseScenarioTemplate):
 
 SCENARIO_TEMPLATES_MAPPING = {
     POD_RECOVERY_SCENARIO_TEMPLATE: PodRecoveryTemplate,
-    POD_EVICTION_SCENARIO_TEMPLATE: PodRecoveryTemplate,
+    POD_EVICTION_SCENARIO_TEMPLATE: PodEvictionTemplate,
+    ROLLING_RESTART_SCENARIO_TEMPLATE: RollingRestartTemplate,
     HPA_CPU_STRESS_SCENARIO_TEMPLATE: HpaCpuStressTemplate,
 }

@@ -6,7 +6,9 @@ from reslib.runtime.phases import ExecutionPhase
 from reslib.schemas.templates import (
     SCENARIO_TEMPLATES_MAPPING,
     HpaCpuStressTemplate,
+    PodEvictionTemplate,
     PodRecoveryTemplate,
+    RollingRestartTemplate,
 )
 
 
@@ -89,10 +91,12 @@ class ResiliencyScenario(BaseModel):
     name: str = Field(..., description="Name of the scenario template.")
     title: str = Field(..., description="Title of the scenario template.")
     description: str = Field(..., description="Description of the scenario template.")
-    template: PodRecoveryTemplate | HpaCpuStressTemplate = Field(
-        ...,
-        description="Scenario-specific template fields.",
-    )
+    template: (
+        PodRecoveryTemplate
+        | PodEvictionTemplate
+        | RollingRestartTemplate
+        | HpaCpuStressTemplate
+    ) = Field(..., description="Scenario-specific template fields.")
     steps: List[StepSpec] = Field(
         ..., description="Ordered list of steps (guardrail/action/rollback)."
     )

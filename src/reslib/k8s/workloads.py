@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime
 from typing import List, Optional
 
 from cachetools import TTLCache
@@ -15,8 +16,14 @@ from reslib.constants import (
     K8DeploymentKind,
     WorkloadStatusEnum,
 )
+from reslib.core.context import set_context
 from reslib.k8s.client import KubernetesClient
-from reslib.k8s.exceptions import WorkloadNotFound
+from reslib.k8s.exceptions import (
+    RollingRestartCompleteError,
+    WorkloadFaultyError,
+    WorkloadNotFound,
+)
+from reslib.k8s.pods import get_latest_pod_ready_time, get_pods_by_labels
 from reslib.k8s.schema import (
     ContainerHealthSpec,
     ContainerSpec,
@@ -87,6 +94,83 @@ def is_deployment_faulty(deployment: V1Deployment) -> bool:
         ):
             return True
     return False
+
+
+async def raise_on_rolling_restart_complete(
+    *,
+    k8s: KubernetesClient,
+    workload_name: str,
+    namespace: str,
+    started_at: str,
+    target_generation: Optional[int],
+) -> None:
+    """Raise when a Deployment has completed the requested rolling restart."""
+    deployment = await k8s.read_namespaced_deployment(
+        name=workload_name,
+        namespace=namespace,
+    )
+
+    if is_deployment_faulty(deployment):
+        raise WorkloadFaultyError(
+            error_code="ROLLING_RESTART_FAILED",
+            message=(
+                f"Deployment '{workload_name}' failed while rolling restart was "
+                "in progress."
+            ),
+            fix_hint=(
+                "Inspect rollout status, deployment events, pod events, and "
+                "container logs for image, config, secret, or dependency failures."
+            ),
+        )
+
+    desired_replicas = deployment.spec.replicas or 0
+    observed_generation = deployment.status.observed_generation or 0
+    updated_replicas = deployment.status.updated_replicas or 0
+    ready_replicas = deployment.status.ready_replicas or 0
+    available_replicas = deployment.status.available_replicas or 0
+    unavailable_replicas = deployment.status.unavailable_replicas or 0
+
+    if target_generation is not None and observed_generation < target_generation:
+        return None
+
+    if not (
+        updated_replicas >= desired_replicas
+        and ready_replicas >= desired_replicas
+        and available_replicas >= desired_replicas
+        and unavailable_replicas == 0
+    ):
+        return None
+
+    pods = await get_pods_by_labels(
+        k8s=k8s,
+        namespace=namespace,
+        labels=deployment.spec.selector.match_labels or {},
+        pod_phase=None,
+    )
+    latest_pod_ready_time = get_latest_pod_ready_time(pods)
+    if (
+        latest_pod_ready_time is None
+        or latest_pod_ready_time <= datetime.fromisoformat(started_at)
+    ):
+        return None
+
+    observed = {
+        "desired_replicas": desired_replicas,
+        "updated_replicas": updated_replicas,
+        "ready_replicas": ready_replicas,
+        "available_replicas": available_replicas,
+        "observed_generation": observed_generation,
+        "rolling_restart_generation": target_generation,
+        "latest_pod_ready_time": latest_pod_ready_time.isoformat(),
+    }
+    set_context("rolling_restart_complete", observed)
+    raise RollingRestartCompleteError(
+        error_code="ROLLING_RESTART_COMPLETE",
+        message=(
+            f"Deployment '{workload_name}' completed rolling restart with "
+            f"{ready_replicas} ready replica(s)."
+        ),
+    )
 
 
 async def get_namespace_policies_snapshot(

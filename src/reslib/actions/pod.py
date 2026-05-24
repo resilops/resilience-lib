@@ -98,7 +98,7 @@ async def build_pod_eviction_task(
         namespace=namespace,
         body=V1Eviction(metadata=V1ObjectMeta(name=pod.metadata.name)),
     )
-    set_context("last_pod_killed_at", h.utc_now_iso())
+    set_context("last_pod_evicted_at", h.utc_now_iso())
     return (
         watch_until(
             condition=pod_absent,
@@ -301,6 +301,6 @@ async def evict_pods(**kwargs) -> Dict:
             "requested_evictions": pods_to_evict,
             "evicted_pods": len(candidate_pods),
             "eviction_timeout_seconds": timeout,
-            "last_pod_killed_at": get_context("last_pod_killed_at"),
+            "last_pod_evicted_at": get_context("last_pod_evicted_at"),
         },
     }

@@ -86,6 +86,14 @@ class KubernetesClient:
             self.apps.read_namespaced_deployment, name=name, namespace=namespace
         )
 
+    async def patch_namespaced_deployment(self, *, name: str, namespace: str, body):
+        return await asyncio.to_thread(
+            self.apps.patch_namespaced_deployment,
+            name=name,
+            namespace=namespace,
+            body=body,
+        )
+
     async def read_namespaced_pod(self, *, name: str, namespace: str):
         return await asyncio.to_thread(
             self.v1_api.read_namespaced_pod, name=name, namespace=namespace

@@ -5,6 +5,7 @@ POD_RUNNING_STATUS = "Running"
 DEPLOYMENT_CONDITION_AVAILABLE = "Available"
 DEPLOYMENT_CONDITION_PROGRESSING = "Progressing"
 PHASE_EXECUTION_MAX_TIMEOUT: int = 1800  # Upper limit cutoff
+MIN_ROLLING_RESTART_REPLICAS: int = 2
 
 DEPLOYMENT_STATUS_RS_AVAILABLE = "NewReplicaSetAvailable"
 DEPLOYMENT_STATUS_MIN_RS_AVAILABLE = "MinimumReplicasAvailable"
@@ -99,6 +100,7 @@ AsyncFunc = Callable[..., Awaitable[None]]
 
 POD_RECOVERY_SCENARIO_TEMPLATE: str = "pod_recovery"
 POD_EVICTION_SCENARIO_TEMPLATE: str = "pod_eviction"
+ROLLING_RESTART_SCENARIO_TEMPLATE: str = "rolling_restart"
 HPA_CPU_STRESS_SCENARIO_TEMPLATE: str = "hpa_cpu_stress"
 
 

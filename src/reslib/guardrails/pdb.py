@@ -1,5 +1,5 @@
 from reslib.core.context import get_context
-from reslib.guardrails.schemas import PDBConfigurationAllowMissing
+from reslib.guardrails.schemas import PDBConfiguration
 from reslib.k8s.exceptions import (
     DisruptionExceedMinAvailabilityError,
     PdbNotConfiguredError,
@@ -27,25 +27,19 @@ async def ensure_pdb_not_violated(**kwargs) -> None:
     scenario: ResiliencyScenario = get_context("scenario")
     namespace = scenario.template.namespace
     workload_name = scenario.template.workload
-    args = PDBConfigurationAllowMissing(**kwargs)
+    PDBConfiguration(**kwargs)
 
     pdb_config_exists: bool = workload.policies and workload.policies.pdb is not None
 
-    if not args.allow_missing_pdb and not pdb_config_exists:
+    if not pdb_config_exists:
         raise PdbNotConfiguredError(
             error_code="PDB_NOT_CONFIGURED",
             message=(
                 f"Workload '{workload_name}' in namespace '{namespace}' does not "
                 "have a PodDisruptionBudget."
             ),
-            fix_hint=(
-                "Create a PodDisruptionBudget for this workload or set "
-                "`allow_missing_pdb=true` to bypass this guardrail explicitly."
-            ),
+            fix_hint="Create a PodDisruptionBudget for this workload.",
         )
-
-    if not pdb_config_exists:
-        return
 
     disruption_budget = get_context("pod_termination_count")
     if not disruption_budget:

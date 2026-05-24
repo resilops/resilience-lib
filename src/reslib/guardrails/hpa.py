@@ -147,7 +147,8 @@ async def ensure_hpa_not_at_max_replicas() -> None:
             error_code="WORKLOAD_AT_HPA_MAX_REPLICAS",
             message=(
                 f"Workload '{workload_name}' is already at {ready} ready replica(s), "
-                f"which meets or exceeds the HPA maximum of {max_replicas}."
+                f"which meets or exceeds the HPA maximum of {max_replicas}. "
+                "No action will be taken, as performing any action may introduce risk."
             ),
             fix_hint="Reduce load or increase `hpa.maxReplicas` before retrying.",
         )

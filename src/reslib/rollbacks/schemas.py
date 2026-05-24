@@ -33,3 +33,14 @@ class PodRespawnTimeout(BaseModel):
         ge=1,
         description="Timeout to respawn a new pod",
     )
+
+
+class RollingRestartTimeout(BaseModel):
+    """Maximum time allowed for a rolling restart to complete."""
+
+    timeout_seconds: int = Field(
+        default=600,
+        ge=1,
+        le=1800,
+        description="Timeout for rolling restart completion",
+    )

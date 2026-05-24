@@ -1,9 +1,7 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict
 
 
-class PDBConfigurationAllowMissing(BaseModel):
-    """Allow missing PDB configuration"""
+class PDBConfiguration(BaseModel):
+    """PDB guardrail configuration."""
 
-    allow_missing_pdb: bool = Field(
-        default=False, description="Allow missing PDB configuration"
-    )
+    model_config = ConfigDict(extra="forbid")

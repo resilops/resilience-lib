@@ -23,6 +23,7 @@ Built-in scenario templates:
 | --- | --- |
 | `pod_recovery` | Terminate one or more workload pods and verify that replacement pods become ready. |
 | `pod_eviction` | Evict one or more workload pods through the Kubernetes eviction API and verify that replacement pods become ready. |
+| `rolling_restart` | Restart a workload and verify the rollout completes with current image, config, secrets, and dependencies. |
 | `hpa_cpu_stress` | Run CPU stress inside selected pods to trigger HPA scale-up, then verify scale-down/stabilization. |
 
 Built-in guardrails:
@@ -30,6 +31,7 @@ Built-in guardrails:
 | Function | Purpose |
 | --- | --- |
 | `ensure_workload_steady` | Blocks execution if the workload is reconciling, unavailable, or degraded. |
+| `ensure_minimum_replicas_for_restart` | Ensures a rolling restart workload has at least two desired and ready replicas. |
 | `validate_min_remaining_replicas` | Ensures a pod disruption keeps enough ready replicas alive. |
 | `ensure_pdb_not_violated` | Ensures the planned pod disruption does not violate the workload PDB. |
 | `ensure_hpa_exists` | Ensures the target workload has an HPA. |
@@ -45,6 +47,7 @@ Built-in actions:
 | --- | --- |
 | `terminate_pods` | Deletes selected workload pods and waits for deletion. |
 | `evict_pods` | Evicts selected workload pods through the Kubernetes eviction subresource and waits for removal. |
+| `perform_rolling_restart` | Patches the Deployment pod template to trigger a rolling restart. |
 | `stress_cpu_hpa` | Executes `stress-ng` inside selected pods until HPA scale-up is observed. |
 
 Built-in observer:
@@ -58,6 +61,7 @@ Built-in rollbacks:
 | Function | Purpose |
 | --- | --- |
 | `wait_until_pod_respawn` | Waits for the Deployment to reach its desired ready replica count after pod termination. |
+| `wait_until_rolling_restart_complete` | Waits for a rolling restart to finish and fails fast on pod/container errors. |
 | `wait_for_hpa_scale_down` | Waits for replicas and CPU utilization to stabilize after HPA scale-up. |
 
 ## Requirements
@@ -121,7 +125,7 @@ scenario = ResiliencyScenario.model_validate(
             {
                 "type": "guardrail",
                 "name": "ensure_pdb_not_violated",
-                "params": {"allow_missing_pdb": False},
+                "params": {},
             },
             {
                 "type": "action",
@@ -160,7 +164,7 @@ Every scenario is represented by `ResiliencyScenario`.
 
 | Field | Description |
 | --- | --- |
-| `name` | Scenario template name. Must currently be `pod_recovery`, `pod_eviction`, or `hpa_cpu_stress`. |
+| `name` | Scenario template name. Must currently be `pod_recovery`, `pod_eviction`, `rolling_restart`, or `hpa_cpu_stress`. |
 | `title` | Human-readable title. |
 | `description` | Human-readable scenario description. |
 | `template` | Scenario-wide Kubernetes and disruption configuration. The shape depends on `name`. |
@@ -244,6 +248,23 @@ Recommended `pod_eviction` phase sequence:
 3. `ensure_pdb_not_violated`
 4. `evict_pods`
 5. `wait_until_pod_respawn`
+
+## `rolling_restart` template
+
+```python
+{
+    "namespace": "default",
+    "workload": "checkout-api",
+}
+```
+
+Recommended `rolling_restart` phase sequence:
+
+1. `ensure_workload_steady`
+2. `ensure_minimum_replicas_for_restart`
+3. `ensure_hpa_not_at_max_replicas`
+4. `perform_rolling_restart`
+5. `wait_until_rolling_restart_complete`
 
 ## `hpa_cpu_stress` template
 
