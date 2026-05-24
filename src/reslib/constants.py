@@ -98,6 +98,7 @@ AsyncFunc = Callable[..., Awaitable[None]]
 
 
 POD_RECOVERY_SCENARIO_TEMPLATE: str = "pod_recovery"
+POD_EVICTION_SCENARIO_TEMPLATE: str = "pod_eviction"
 HPA_CPU_STRESS_SCENARIO_TEMPLATE: str = "hpa_cpu_stress"
 
 

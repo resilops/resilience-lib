@@ -106,6 +106,14 @@ class KubernetesClient:
             body=body,
         )
 
+    async def create_namespaced_pod_eviction(self, *, name: str, namespace: str, body):
+        return await asyncio.to_thread(
+            self.v1_api.create_namespaced_pod_eviction,
+            name=name,
+            namespace=namespace,
+            body=body,
+        )
+
     async def read_namespaced_horizontal_pod_autoscaler(
         self, *, name: str, namespace: str
     ):

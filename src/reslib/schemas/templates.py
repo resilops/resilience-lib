@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 
 from reslib.constants import (
     HPA_CPU_STRESS_SCENARIO_TEMPLATE,
+    POD_EVICTION_SCENARIO_TEMPLATE,
     POD_RECOVERY_SCENARIO_TEMPLATE,
     HpaMetricSourceEnum,
     HpaResourceTypeEnum,
@@ -142,5 +143,6 @@ class HpaCpuStressTemplate(BaseScenarioTemplate):
 
 SCENARIO_TEMPLATES_MAPPING = {
     POD_RECOVERY_SCENARIO_TEMPLATE: PodRecoveryTemplate,
+    POD_EVICTION_SCENARIO_TEMPLATE: PodRecoveryTemplate,
     HPA_CPU_STRESS_SCENARIO_TEMPLATE: HpaCpuStressTemplate,
 }

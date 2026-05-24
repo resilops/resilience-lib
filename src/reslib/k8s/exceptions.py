@@ -29,6 +29,10 @@ class PodDeletionTimeoutError(BaseError):
     pass
 
 
+class PodEvictionTimeoutError(BaseError):
+    pass
+
+
 class PodsSelectionError(BaseError):
     pass
 

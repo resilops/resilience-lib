@@ -21,7 +21,8 @@ Built-in scenario templates:
 
 | Template | Purpose |
 | --- | --- |
-| `pod_kill` | Terminate one or more workload pods and verify that replacement pods become ready. |
+| `pod_recovery` | Terminate one or more workload pods and verify that replacement pods become ready. |
+| `pod_eviction` | Evict one or more workload pods through the Kubernetes eviction API and verify that replacement pods become ready. |
 | `hpa_cpu_stress` | Run CPU stress inside selected pods to trigger HPA scale-up, then verify scale-down/stabilization. |
 
 Built-in guardrails:
@@ -43,6 +44,7 @@ Built-in actions:
 | Function | Purpose |
 | --- | --- |
 | `terminate_pods` | Deletes selected workload pods and waits for deletion. |
+| `evict_pods` | Evicts selected workload pods through the Kubernetes eviction subresource and waits for removal. |
 | `stress_cpu_hpa` | Executes `stress-ng` inside selected pods until HPA scale-up is observed. |
 
 Built-in observer:
@@ -65,7 +67,8 @@ Built-in rollbacks:
 - Access to a Kubernetes cluster
 - Permissions to read Deployments, Services, HPAs, PDBs, Pods, Events, and pod
   metrics in the target namespace
-- Permissions to delete pods for `pod_kill`
+- Permissions to delete pods for `pod_recovery`
+- Permissions to create pod evictions for `pod_eviction`
 - Permissions to exec into pods for `hpa_cpu_stress`
 - Metrics Server installed for HPA CPU stress guardrails
 - `stress-ng` available in the target container image for `hpa_cpu_stress`
@@ -102,8 +105,8 @@ from reslib.schemas.scenario import ResiliencyScenario
 
 scenario = ResiliencyScenario.model_validate(
     {
-        "name": "pod_kill",
-        "title": "Pod kill recovery test",
+        "name": "pod_recovery",
+        "title": "Pod recovery test",
         "description": "Terminate one pod and verify the Deployment recovers.",
         "template": {
             "namespace": "default",
@@ -157,7 +160,7 @@ Every scenario is represented by `ResiliencyScenario`.
 
 | Field | Description |
 | --- | --- |
-| `name` | Scenario template name. Must currently be `pod_kill` or `hpa_cpu_stress`. |
+| `name` | Scenario template name. Must currently be `pod_recovery`, `pod_eviction`, or `hpa_cpu_stress`. |
 | `title` | Human-readable title. |
 | `description` | Human-readable scenario description. |
 | `template` | Scenario-wide Kubernetes and disruption configuration. The shape depends on `name`. |
@@ -192,7 +195,7 @@ Observer objects use this shape:
 }
 ```
 
-## `pod_kill` template
+## `pod_recovery` template
 
 ```python
 {
@@ -212,12 +215,34 @@ Observer objects use this shape:
 | `mode` | `absolute` or `percentage`. |
 | `min_remaining_replicas` | Minimum ready replicas that must remain after pod termination. |
 
-Recommended `pod_kill` phase sequence:
+Recommended `pod_recovery` phase sequence:
 
 1. `ensure_workload_steady`
 2. `validate_min_remaining_replicas`
 3. `ensure_pdb_not_violated`
 4. `terminate_pods`
+5. `wait_until_pod_respawn`
+
+## `pod_eviction` template
+
+`pod_eviction` uses the same template fields as `pod_recovery`:
+
+```python
+{
+    "namespace": "default",
+    "workload": "checkout-api",
+    "quantity": 1,
+    "mode": "absolute",
+    "min_remaining_replicas": 1,
+}
+```
+
+Recommended `pod_eviction` phase sequence:
+
+1. `ensure_workload_steady`
+2. `validate_min_remaining_replicas`
+3. `ensure_pdb_not_violated`
+4. `evict_pods`
 5. `wait_until_pod_respawn`
 
 ## `hpa_cpu_stress` template
