@@ -1,4 +1,4 @@
-from reslib.core.context import get_context, set_context
+from reslib.core.context import get_context
 from reslib.k8s.exceptions import DisruptionExceedMinAvailabilityError
 from reslib.k8s.schema import WorkloadState
 from reslib.schemas.scenario import ResiliencyScenario
@@ -65,5 +65,3 @@ async def validate_min_remaining_replicas() -> None:
                 "increase the workload replica count."
             ),
         )
-
-    set_context("pod_termination_count", pods_to_terminate)
