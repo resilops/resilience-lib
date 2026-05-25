@@ -23,3 +23,14 @@ class PodStressSchema(BaseModel):
             "stress begins. Default is 120s."
         ),
     )
+
+
+class EndpointDrainSchema(BaseModel):
+    """Configuration for endpoint drain completion timeout."""
+
+    timeout_seconds: int = Field(
+        default=120,
+        ge=1,
+        le=600,
+        description="Timeout for a drained pod IP to leave EndpointSlices.",
+    )

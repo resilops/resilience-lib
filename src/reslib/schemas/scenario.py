@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from reslib.runtime.phases import ExecutionPhase
 from reslib.schemas.templates import (
     SCENARIO_TEMPLATES_MAPPING,
+    EndpointDrainTemplate,
     HpaCpuStressTemplate,
     PodEvictionTemplate,
     PodRecoveryTemplate,
@@ -95,6 +96,7 @@ class ResiliencyScenario(BaseModel):
         PodRecoveryTemplate
         | PodEvictionTemplate
         | RollingRestartTemplate
+        | EndpointDrainTemplate
         | HpaCpuStressTemplate
     ) = Field(..., description="Scenario-specific template fields.")
     steps: List[StepSpec] = Field(

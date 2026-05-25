@@ -1,4 +1,6 @@
-from reslib.constants import MIN_ROLLING_RESTART_REPLICAS, WorkloadStatusEnum
+from pydantic import BaseModel, Field
+
+from reslib.constants import DEFAULT_MIN_REPLICAS, WorkloadStatusEnum
 from reslib.core.context import get_context
 from reslib.k8s.exceptions import (
     InsufficientReplicasError,
@@ -9,6 +11,10 @@ from reslib.k8s.exceptions import (
 )
 from reslib.k8s.schema import WorkloadState
 from reslib.schemas.scenario import ResiliencyScenario
+
+
+class MinimumReplicasParams(BaseModel):
+    min_replicas: int = Field(default=DEFAULT_MIN_REPLICAS, ge=1)
 
 
 async def ensure_workload_steady() -> None:
@@ -76,13 +82,15 @@ async def ensure_workload_steady() -> None:
         )
 
 
-async def ensure_minimum_replicas_for_restart() -> None:
+async def ensure_minimum_replicas(**kwargs) -> None:
     """
-    Validate that a workload has enough replicas for a rolling restart.
+    Validate that a workload has enough desired and ready replicas.
 
-    A rolling restart needs at least two desired and ready replicas to preserve
-    availability while Kubernetes replaces pods.
+    Traffic-impacting scenarios usually remove or replace one pod at a time, so
+    the default minimum is two replicas. The minimum can be raised by passing
+    ``min_replicas``.
     """
+    args = MinimumReplicasParams(**kwargs)
     workload: WorkloadState = get_context("workload")
     scenario: ResiliencyScenario = get_context("scenario")
     namespace = scenario.template.namespace
@@ -90,20 +98,17 @@ async def ensure_minimum_replicas_for_restart() -> None:
     desired_replicas = workload.spec.replicas
     ready_replicas = workload.runtime.ready_replicas if workload.runtime else 0
 
-    if (
-        desired_replicas < MIN_ROLLING_RESTART_REPLICAS
-        or ready_replicas < MIN_ROLLING_RESTART_REPLICAS
-    ):
+    if desired_replicas < args.min_replicas or ready_replicas < args.min_replicas:
         raise InsufficientReplicasError(
-            error_code="INSUFFICIENT_REPLICAS_FOR_ROLLING_RESTART",
+            error_code="INSUFFICIENT_REPLICAS",
             message=(
                 f"Workload '{workload_name}' in namespace '{namespace}' needs at "
-                f"least {MIN_ROLLING_RESTART_REPLICAS} desired and ready replicas "
-                f"for a rolling restart, but has {desired_replicas} desired and "
+                f"least {args.min_replicas} desired and ready replicas for "
+                f"scenario '{scenario.name}', but has {desired_replicas} desired and "
                 f"{ready_replicas} ready replica(s)."
             ),
             fix_hint=(
-                "Scale the workload to at least 2 replicas and wait for both "
-                "replicas to become ready before retrying."
+                f"Scale the workload to at least {args.min_replicas} replicas and "
+                "wait for those replicas to become ready before retrying."
             ),
         )

@@ -3,6 +3,7 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 from reslib.constants import (
+    ENDPOINT_DRAIN_SCENARIO_TEMPLATE,
     HPA_CPU_STRESS_SCENARIO_TEMPLATE,
     POD_EVICTION_SCENARIO_TEMPLATE,
     POD_RECOVERY_SCENARIO_TEMPLATE,
@@ -96,6 +97,19 @@ class RollingRestartTemplate(BaseScenarioTemplate):
     """
 
 
+class EndpointDrainTemplate(BaseScenarioTemplate):
+    """
+    Template for draining one pod from Service endpoints.
+
+    If `service_name` is omitted, the discovered workload Service is used.
+    """
+
+    service_name: Optional[str] = Field(
+        default=None,
+        description="Optional Service name to target for endpoint drain.",
+    )
+
+
 class HpaCpuStressTemplate(BaseScenarioTemplate):
     """
     Template for CPU-based Horizontal Pod Autoscaler (HPA) stress testing.
@@ -167,5 +181,6 @@ SCENARIO_TEMPLATES_MAPPING = {
     POD_RECOVERY_SCENARIO_TEMPLATE: PodRecoveryTemplate,
     POD_EVICTION_SCENARIO_TEMPLATE: PodEvictionTemplate,
     ROLLING_RESTART_SCENARIO_TEMPLATE: RollingRestartTemplate,
+    ENDPOINT_DRAIN_SCENARIO_TEMPLATE: EndpointDrainTemplate,
     HPA_CPU_STRESS_SCENARIO_TEMPLATE: HpaCpuStressTemplate,
 }

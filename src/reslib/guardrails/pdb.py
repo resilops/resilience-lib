@@ -1,3 +1,4 @@
+from reslib.constants import ENDPOINT_DRAIN_SCENARIO_TEMPLATE
 from reslib.core.context import get_context
 from reslib.k8s.exceptions import (
     DisruptionExceedMinAvailabilityError,
@@ -28,9 +29,13 @@ async def ensure_pdb_not_violated(**kwargs) -> None:  # noqa
     namespace = scenario.template.namespace
     workload_name = scenario.template.workload
 
+    is_endpoint_drain = scenario.name == ENDPOINT_DRAIN_SCENARIO_TEMPLATE
     pdb_config_exists: bool = workload.policies and workload.policies.pdb is not None
 
     if not pdb_config_exists:
+        if is_endpoint_drain:
+            return
+
         raise PdbNotConfiguredError(
             error_code="PDB_NOT_CONFIGURED",
             message=(
@@ -41,12 +46,37 @@ async def ensure_pdb_not_violated(**kwargs) -> None:  # noqa
         )
 
     ready_replicas = workload.runtime.ready_replicas or 0
-    selection = QuantitySelection(
-        mode=scenario.template.mode,
-        amount=scenario.template.quantity,
-    )
-    disruption_budget = selection.with_total(ready_replicas)
-    min_available = workload.policies.pdb.min_available
+
+    if is_endpoint_drain:
+        disruption_budget = 1
+        action_label = "Draining"
+    else:
+        selection = QuantitySelection(
+            mode=scenario.template.mode,
+            amount=scenario.template.quantity,
+        )
+        disruption_budget = selection.with_total(ready_replicas)
+        action_label = "Disrupting"
+
+    pdb = workload.policies.pdb
+    max_unavailable = pdb.max_unavailable
+    if max_unavailable is not None and disruption_budget > max_unavailable:
+        raise DisruptionExceedMinAvailabilityError(
+            error_code="PDB_MAX_UNAVAILABLE_VIOLATION",
+            message=(
+                f"{action_label} {disruption_budget} pod(s) from workload "
+                f"'{workload_name}' would exceed the PodDisruptionBudget maximum "
+                f"unavailable count of {max_unavailable}."
+            ),
+            fix_hint=(
+                "Reduce the planned disruption, increase replicas, or adjust the "
+                "PodDisruptionBudget if that is intentional."
+            ),
+        )
+
+    min_available = pdb.min_available
+    if min_available is None:
+        return
 
     remaining_pods = ready_replicas - disruption_budget
 
@@ -54,13 +84,13 @@ async def ensure_pdb_not_violated(**kwargs) -> None:  # noqa
         raise DisruptionExceedMinAvailabilityError(
             error_code="PDB_MIN_AVAILABLE_VIOLATION",
             message=(
-                f"Disrupting {disruption_budget} pod(s) would leave {remaining_pods} "
-                f"ready pod(s), below the PodDisruptionBudget minimum of "
-                f"{min_available}."
+                f"{action_label} {disruption_budget} pod(s) from workload "
+                f"'{workload_name}' would leave {remaining_pods} ready pod(s), "
+                f"below the PodDisruptionBudget minimum of {min_available}."
             ),
             fix_hint=(
-                f"Reduce pod terminations to at most "
-                f"{max(0, ready_replicas - min_available)}, or adjust the "
-                "PodDisruptionBudget if that is intentional."
+                f"Reduce the planned disruption to at most "
+                f"{max(0, ready_replicas - min_available)} pod(s), increase "
+                "replicas, or adjust the PodDisruptionBudget if that is intentional."
             ),
         )

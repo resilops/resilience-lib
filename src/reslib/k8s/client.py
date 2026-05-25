@@ -21,6 +21,7 @@ class KubernetesClient:
         self._apps_api: Optional[client.AppsV1Api] = None
         self._autoscaling_api: Optional[client.AutoscalingV2Api] = None
         self._policy_api: Optional[client.PolicyV1Api] = None
+        self._discovery_api: Optional[client.DiscoveryV1Api] = None
         self._custom_api: Optional[client.CustomObjectsApi] = None
 
     @staticmethod
@@ -76,6 +77,12 @@ class KubernetesClient:
         return self._policy_api
 
     @property
+    def discovery(self) -> client.DiscoveryV1Api:
+        if self._discovery_api is None:
+            self._discovery_api = client.DiscoveryV1Api(self.api)
+        return self._discovery_api
+
+    @property
     def custom(self) -> client.CustomObjectsApi:
         if self._custom_api is None:
             self._custom_api = client.CustomObjectsApi(self.api)
@@ -97,6 +104,14 @@ class KubernetesClient:
     async def read_namespaced_pod(self, *, name: str, namespace: str):
         return await asyncio.to_thread(
             self.v1_api.read_namespaced_pod, name=name, namespace=namespace
+        )
+
+    async def patch_namespaced_pod(self, *, name: str, namespace: str, body):
+        return await asyncio.to_thread(
+            self.v1_api.patch_namespaced_pod,
+            name=name,
+            namespace=namespace,
+            body=body,
         )
 
     async def list_namespaced_pod(self, *, namespace: str, label_selector: str):
@@ -171,4 +186,20 @@ class KubernetesClient:
         return await asyncio.to_thread(
             self.v1_api.list_namespaced_service,
             namespace=namespace,
+        )
+
+    async def read_namespaced_service(self, *, name: str, namespace: str):
+        return await asyncio.to_thread(
+            self.v1_api.read_namespaced_service,
+            name=name,
+            namespace=namespace,
+        )
+
+    async def list_namespaced_endpoint_slice(
+        self, *, namespace: str, label_selector: str
+    ):
+        return await asyncio.to_thread(
+            self.discovery.list_namespaced_endpoint_slice,
+            namespace=namespace,
+            label_selector=label_selector,
         )

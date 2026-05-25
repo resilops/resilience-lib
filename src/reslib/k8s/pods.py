@@ -30,6 +30,14 @@ def get_latest_pod_ready_time(pods: List[V1Pod]) -> Optional[datetime]:
     return max(ready_times) if ready_times else None
 
 
+def is_pod_ready(pod: V1Pod) -> bool:
+    """Return whether a pod has a Ready=True condition."""
+    for condition in pod.status.conditions or []:
+        if condition.type == "Ready" and condition.status == "True":
+            return True
+    return False
+
+
 async def get_pods_by_labels(
     *,
     k8s: KubernetesClient,

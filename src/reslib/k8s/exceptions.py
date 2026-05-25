@@ -99,3 +99,15 @@ class RollingRestartCompleteError(BaseError):
 
 class RollingRestartTimeoutError(BaseError):
     pass
+
+
+class EndpointDrainSelectionError(BaseError):
+    pass
+
+
+class EndpointDrainTimeoutError(BaseError):
+    pass
+
+
+class EndpointRestoreTimeoutError(BaseError):
+    pass

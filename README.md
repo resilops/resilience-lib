@@ -31,9 +31,9 @@ Built-in guardrails:
 | Function | Purpose |
 | --- | --- |
 | `ensure_workload_steady` | Blocks execution if the workload is reconciling, unavailable, or degraded. |
-| `ensure_minimum_replicas_for_restart` | Ensures a rolling restart workload has at least two desired and ready replicas. |
+| `ensure_minimum_replicas` | Ensures the workload has the configured number of desired and ready replicas. Defaults to two. |
 | `validate_min_remaining_replicas` | Ensures a pod disruption keeps enough ready replicas alive. |
-| `ensure_pdb_not_violated` | Ensures the planned pod disruption does not violate the workload PDB. |
+| `ensure_pdb_not_violated` | Ensures the planned pod disruption does not violate the workload PDB. For endpoint drain, missing PDBs are allowed and an existing PDB is checked against one drained endpoint. |
 | `ensure_hpa_exists` | Ensures the target workload has an HPA. |
 | `ensure_hpa_not_at_max_replicas` | Blocks HPA testing if the workload is already at max replicas. |
 | `validate_metric_and_resource` | Ensures the requested HPA metric source and resource type are supported. |
@@ -261,7 +261,7 @@ Recommended `pod_eviction` phase sequence:
 Recommended `rolling_restart` phase sequence:
 
 1. `ensure_workload_steady`
-2. `ensure_minimum_replicas_for_restart`
+2. `ensure_minimum_replicas`
 3. `ensure_hpa_not_at_max_replicas`
 4. `perform_rolling_restart`
 5. `wait_until_rolling_restart_complete`

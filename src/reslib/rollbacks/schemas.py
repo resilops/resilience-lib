@@ -44,3 +44,14 @@ class RollingRestartTimeout(BaseModel):
         le=1800,
         description="Timeout for rolling restart completion",
     )
+
+
+class EndpointRestoreTimeout(BaseModel):
+    """Maximum time allowed for a drained endpoint to be restored."""
+
+    timeout_seconds: int = Field(
+        default=120,
+        ge=1,
+        le=600,
+        description="Timeout for a restored pod IP to return to EndpointSlices",
+    )

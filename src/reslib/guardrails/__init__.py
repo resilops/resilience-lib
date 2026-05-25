@@ -9,7 +9,7 @@ from reslib.guardrails.hpa import (
 from reslib.guardrails.metrics import ensure_metrics_server_available
 from reslib.guardrails.pdb import ensure_pdb_not_violated
 from reslib.guardrails.workload import (
-    ensure_minimum_replicas_for_restart,
+    ensure_minimum_replicas,
     ensure_workload_steady,
 )
 
@@ -23,5 +23,5 @@ __all__ = (
     "ensure_metrics_server_available",
     "ensure_pdb_not_violated",
     "ensure_workload_steady",
-    "ensure_minimum_replicas_for_restart",
+    "ensure_minimum_replicas",
 )
