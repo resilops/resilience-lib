@@ -1,6 +1,6 @@
 # resilience-lib
 
-`resilience-lib` is the Python runtime library used by resilty.io to execute
+`resilience-lib` is the Python runtime library used by resilopshq.com to execute
 Kubernetes resilience scenarios. It validates a target workload, runs a
 controlled disruption, observes application behavior during the experiment, and
 waits for the workload to recover.
@@ -81,7 +81,7 @@ By default the library loads in-cluster Kubernetes configuration. For local
 development, set:
 
 ```bash
-export RESILTY_RESILIENCE_LIB_IN_CLUSTER_CONFIG=false
+export RESILOPS_RESILIENCE_LIB_IN_CLUSTER_CONFIG=false
 ```
 
 ## Installation
@@ -394,12 +394,12 @@ counts, latency sums, min/max/avg latency, and cumulative latency buckets.
 ## Configuration
 
 Configuration is loaded through Pydantic settings using the
-`RESILTY_RESILIENCE_LIB_` environment prefix.
+`RESILOPS_RESILIENCE_LIB_` environment prefix.
 
 | Environment variable | Default | Description |
 | --- | --- | --- |
-| `RESILTY_RESILIENCE_LIB_IN_CLUSTER_CONFIG` | `true` | Load in-cluster Kubernetes configuration. Set to `false` to use local kubeconfig. |
-| `RESILTY_RESILIENCE_LIB_POD_TERMINATION_DEFAULT_GRACE_PERIOD` | `30` | Default pod termination grace period in seconds. |
+| `RESILOPS_RESILIENCE_LIB_IN_CLUSTER_CONFIG` | `true` | Load in-cluster Kubernetes configuration. Set to `false` to use local kubeconfig. |
+| `RESILOPS_RESILIENCE_LIB_POD_TERMINATION_DEFAULT_GRACE_PERIOD` | `30` | Default pod termination grace period in seconds. |
 
 ## Handler resolution
 

@@ -5,7 +5,7 @@ build-backend = "poetry.core.masonry.api"
 [tool.poetry]
 name = "resilience-lib"
 version = "1.0.0"
-description = "resilty.io lib, that is responsible for running the resilience tests"
+description = "resilopshq.com lib, that is responsible for running the resilience tests"
 authors = ["Swaroop Shubhakrishna Bhat <swaroopbhatk@gmail.com>"]
 license = "Apache-2.0"
 readme = "README.md"
@@ -73,6 +73,6 @@ show_missing = true
 skip_covered = true
 
 [tool.poetry.urls]
-homepage = "https://github.com/resiltyio/resilience-lib"
-documentation = "https://github.com/resiltyio/resilience-lib/tree/main/docs"
-bug-tracker = "https://github.com/resiltyio/resilience-lib/issues"
+homepage = "https://github.com/resilops/resilience-lib"
+documentation = "https://github.com/resilops/resilience-lib/tree/main/docs"
+bug-tracker = "https://github.com/resilops/resilience-lib/issues"

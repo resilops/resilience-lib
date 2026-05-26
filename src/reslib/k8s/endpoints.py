@@ -8,7 +8,7 @@ from reslib.k8s.pods import get_pods_by_labels, is_pod_ready
 from reslib.k8s.schema import WorkloadState
 
 SERVICE_NAME_LABEL = "kubernetes.io/service-name"
-DRAINED_LABEL_VALUE_PREFIX = "resilty-drained"
+DRAINED_LABEL_VALUE_PREFIX = "resilops-drained"
 
 
 def labels_to_selector(labels: Dict[str, str]) -> str:

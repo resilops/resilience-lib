@@ -9,7 +9,7 @@ from reslib.schemas.scenario import ResiliencyScenario
 
 logger = logging.getLogger(__name__)
 
-ROLLING_RESTART_ANNOTATION = "resilty.io/restartedAt"
+ROLLING_RESTART_ANNOTATION = "resilopshq.com/restartedAt"
 
 
 async def perform_rolling_restart(**kwargs) -> Dict:
