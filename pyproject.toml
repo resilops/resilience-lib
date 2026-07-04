@@ -26,8 +26,6 @@ keywords = [
 [tool.poetry.dependencies]
 python = "^3.12"
 python-json-logger = "^4.1.0"
-pytest = "^9.1.1"
-pytest-asyncio = "^1.4.0"
 kubernetes = "^36.0.2"
 pydantic = "^2.13.4"
 pydantic-settings = "^2.14.2"
@@ -35,8 +33,9 @@ aiohttp = "^3.14.1"
 httpx = "^0.28.1"
 cachetools = "^7.1.4"
 
-[tool.poetry.group.dev.dependencies]
+[tool.poetry.group.test.dependencies]
 pytest = "^9.1.1"
+pytest-asyncio = "^1.4.0"
 pytest-cov = "^7.1.0"
 
 [tool.black]
@@ -65,12 +64,21 @@ target-version = "py310"
 select = ["E", "F", "I", "B"]
 
 [tool.coverage.run]
-source = ["agent"]
+source = ["reslib"]
 branch = true
 
 [tool.coverage.report]
 show_missing = true
 skip_covered = true
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["src/reslib"]
+python_files = ["test_*.py"]
+asyncio_mode = "auto"
+norecursedirs = ["__pycache__"]
+addopts = "--cov=reslib.config --cov=reslib.constants --cov=reslib.exceptions --cov=reslib.helpers --cov=reslib.logging --cov=reslib.actions.schemas --cov=reslib.core.context --cov=reslib.core.watchdog --cov=reslib.guardrails.availability --cov=reslib.k8s.client --cov=reslib.k8s.exceptions --cov=reslib.k8s.schema --cov=reslib.observers.http --cov=reslib.observers.schemas --cov=reslib.rollbacks.schemas --cov=reslib.runtime.resolve --cov=reslib.schemas.scenario --cov=reslib.schemas.validators --cov-report=term-missing --cov-fail-under=80"
+
 
 [tool.poetry.urls]
 homepage = "https://github.com/resilops/resilience-lib"
