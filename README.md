@@ -20,7 +20,7 @@ reliability, platform engineering, SRE, and release validation workflows.
 - pre-release resilience checks
 - CI/CD release gates
 - recurring validation for drift detection
-- evidence collection for resilience and SLO expectations
+- evidence collection for resilience expectations and reliability targets
 
 It is intentionally built around explicit scenarios, guardrails, observers,
 actions, and rollback checks so that each run has a clear scope and outcome.
