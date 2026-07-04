@@ -1,9 +1,49 @@
 # resilience-lib
 
-`resilience-lib` is the Python runtime library used by resilopshq.com to execute
-Kubernetes resilience scenarios. It validates a target workload, runs a
-controlled disruption, observes application behavior during the experiment, and
-waits for the workload to recover.
+`resilience-lib` is the Python runtime library used by ResilOps to run
+Kubernetes resilience validation. It validates a target workload against
+expected behavior, runs a controlled disruption, observes application behavior
+during the run, and waits for the workload to recover.
+
+The goal is not to create random failure. The goal is to produce repeatable
+evidence that a workload meets resilience and recovery expectations before
+release and as environments drift over time.
+
+This repository is public because the execution model should be inspectable and
+extensible. Contributions are welcome from engineers working on Kubernetes
+reliability, platform engineering, SRE, and release validation workflows.
+
+## What this library is for
+
+`resilience-lib` is designed for controlled workload validation:
+
+- pre-release resilience checks
+- CI/CD release gates
+- recurring validation for drift detection
+- evidence collection for resilience and SLO expectations
+
+It is intentionally built around explicit scenarios, guardrails, observers,
+actions, and rollback checks so that each run has a clear scope and outcome.
+
+## How this differs from chaos engineering
+
+This project overlaps with some chaos engineering techniques, but it is not the
+same thing.
+
+`resilience-lib` is centered on validating whether a workload satisfies a known
+expectation with bounded, repeatable checks. In practice that means:
+
+- experiments are scenario-driven rather than open-ended fault exploration
+- guardrails block execution when the workload is already unstable
+- rollback and recovery verification are part of the runtime contract
+- results are meant to support release readiness and drift detection, not just
+  broad fault discovery
+- the scope is conservative by default and optimized for operational confidence
+
+If you want unrestricted failure exploration, large-scale game days, or
+production fault injection as a practice in itself, that is a different
+discipline. This library focuses on reliability validation with controlled
+blast radius.
 
 The library is intentionally phase-based:
 
@@ -447,6 +487,31 @@ poetry run pre-commit run --all-files
 
 The pre-commit configuration runs YAML checks, end-of-file checks, trailing
 whitespace checks, Black, isort, and flake8.
+
+## Contributing
+
+Contributions are welcome.
+
+Useful contributions include:
+
+- new scenario templates
+- new guardrails, observers, actions, or rollback handlers
+- clearer documentation and examples
+- test coverage improvements
+- bug fixes around Kubernetes behavior and recovery validation
+
+When contributing:
+
+1. Open an issue for larger changes so the scenario shape and runtime contract
+   are clear before implementation.
+2. Keep changes scoped to the relevant runtime phase or schema surface.
+3. Add or update tests with the change.
+4. Run `poetry run pytest` and `poetry run pre-commit run --all-files` before
+   opening a pull request.
+
+If you are proposing a new resilience check, prefer a concrete workload
+behavior, a bounded disruption, and a clear success condition. That keeps the
+library aligned with validation rather than unstructured chaos experiments.
 
 ## Project layout
 
