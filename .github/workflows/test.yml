@@ -1,4 +1,4 @@
-name: Resilience Lib Tests
+name: Tests
 
 on:
   pull_request:
