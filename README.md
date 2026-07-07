@@ -2,8 +2,8 @@
 
 [![Tests](https://github.com/resilops/resilience-lib/actions/workflows/test.yml/badge.svg)](https://github.com/resilops/resilience-lib/actions/workflows/test.yml)
 [![codecov](https://codecov.io/gh/resilops/resilience-lib/graph/badge.svg)](https://codecov.io/gh/resilops/resilience-lib)
-[![GitHub Release](https://img.shields.io/github/v/release/resilops/resilience-lib)](https://github.com/resilops/resilience-lib/releases)
 [![License](https://img.shields.io/github/license/resilops/resilience-lib)](https://github.com/resilops/resilience-lib/blob/main/LICENSE)
+[![Python](https://img.shields.io/badge/python-3.12%2B-blue)](https://github.com/resilops/resilience-lib/blob/main/pyproject.toml)
 
 `resilience-lib` is the Python runtime library used by ResilOps to run
 Kubernetes resilience validation. It validates a target workload against
