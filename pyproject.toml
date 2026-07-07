@@ -77,7 +77,7 @@ testpaths = ["src/reslib"]
 python_files = ["test_*.py"]
 asyncio_mode = "auto"
 norecursedirs = ["__pycache__"]
-addopts = "--cov=reslib.config --cov=reslib.constants --cov=reslib.exceptions --cov=reslib.helpers --cov=reslib.logging --cov=reslib.actions.schemas --cov=reslib.core.context --cov=reslib.core.watchdog --cov=reslib.guardrails.availability --cov=reslib.k8s.client --cov=reslib.k8s.exceptions --cov=reslib.k8s.schema --cov=reslib.observers.http --cov=reslib.observers.schemas --cov=reslib.rollbacks.schemas --cov=reslib.runtime.resolve --cov=reslib.schemas.scenario --cov=reslib.schemas.validators --cov-report=term-missing --cov-fail-under=80"
+addopts = "--cov=reslib.config --cov=reslib.constants --cov=reslib.exceptions --cov=reslib.helpers --cov=reslib.logging --cov=reslib.actions.schemas --cov=reslib.core.context --cov=reslib.core.watchdog --cov=reslib.guardrails.availability --cov=reslib.k8s.client --cov=reslib.k8s.exceptions --cov=reslib.k8s.schema --cov=reslib.observers.http --cov=reslib.observers.schemas --cov=reslib.rollbacks.schemas --cov=reslib.runtime.resolve --cov=reslib.schemas.scenario --cov=reslib.schemas.validators --cov-report=term-missing --cov-report=xml:coverage.xml --cov-fail-under=80"
 
 
 [tool.poetry.urls]
